@@ -13,30 +13,20 @@ const Q32 = 0x9e3779b9
 const P64 = 0xb7e151628aed2a6b
 const Q64 = 0x9e3779b97f4a7c15
 
-immutable type State{W<:Unsigned}
-    w::Type{W}
+immutable State{W<:Unsigned}
     r::Uint8
     k::Array{Uint8}
     s::Array{W}
 end
 
-function Base.show(io::IO, s::State)
-    print(io, @sprintf("RC5-%d/%d/%d 0x%s", 
-                       8*sizeof(s.w), s.r, length(s.k), bytes2hex(s.k)))
-end
+State(w::Type{Uint8}, r::Uint8, k::Array{Uint8}) = State{w}(r, k, expand(w, r, k, P8, Q8))
+State(w::Type{Uint16}, r::Uint8, k::Array{Uint8}) = State{w}(r, k, expand(w, r, k, P16, Q16))
+State(w::Type{Uint32}, r::Uint8, k::Array{Uint8}) = State{w}(r, k, expand(w, r, k, P32, Q32))
+State(w::Type{Uint64}, r::Uint8, k::Array{Uint8}) = State{w}(r, k, expand(w, r, k, P64, Q64))
 
-function rc5(w::Type, r::Uint8, k::Array{Uint8})
-    if w == Uint8
-        State{w}(w, r, k, expand(w, r, k, P8, Q8))
-    elseif w == Uint16
-        State{w}(w, r, k, expand(w, r, k, P16, Q16))
-    elseif w == Uint32
-        State{w}(w, r, k, expand(w, r, k, P32, Q32))
-    elseif w == Uint64
-        State{w}(w, r, k, expand(w, r, k, P64, Q64))
-    else
-        throw(DomainError())
-    end
+function Base.show{W}(io::IO, s::State{W})
+    print(io, @sprintf("RC5-%d/%d/%d 0x%s", 
+                       8*sizeof(W), s.r, length(s.k), bytes2hex(s.k)))
 end
 
 function rotatel{W<:Unsigned}(x::W, n::Integer)
@@ -78,8 +68,8 @@ function encrypt{W<:Unsigned}(s::State{W}, a::W, b::W)
     a::W = a + s.s[1]
     b::W = b + s.s[2]
     for i = 1:s.r
-        a = rotatel(s.w, a $ b, b) + s.s[2i+1]
-        b = rotatel(s.w, a $ b, a) + s.s[2i+2]
+        a = rotatel(W, a $ b, b) + s.s[2i+1]
+        b = rotatel(W, a $ b, a) + s.s[2i+2]
     end
     a, b
 end
@@ -95,7 +85,7 @@ function test_rotatel()
 end
 
 function test_vectors()
-    a, b = encrypt(rc5(Uint32, 0x0c, zeros(Uint8, 16)), 0x00000000, 0x00000000)
+    a, b = encrypt(State(Uint32, 0x0c, zeros(Uint8, 16)), 0x00000000, 0x00000000)
     @assert a == 0xeedba521 a
     @assert b == 0x6d8f4b15 b
 end
@@ -108,5 +98,5 @@ end
 end
 
 RC5.tests()
-println(RC5.rc5(Uint8, 0x0c, b"secret"))
-println(RC5.rc5(Uint32, 0x0c, b"1234567812345678"))
+println(RC5.State(Uint8, 0x0c, b"secret"))
+println(RC5.State(Uint32, 0x0c, b"1234567812345678"))
