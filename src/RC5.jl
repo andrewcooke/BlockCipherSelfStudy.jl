@@ -3,13 +3,10 @@ module RC5
 
 const P8 = 0xb7
 const Q8 = 0x9e
-
 const P16 = 0xb7e1
 const Q16 = 0x9e37
-
 const P32 = 0xb7e15163
 const Q32 = 0x9e3779b9
-
 const P64 = 0xb7e151628aed2a6b
 const Q64 = 0x9e3779b97f4a7c15
 
