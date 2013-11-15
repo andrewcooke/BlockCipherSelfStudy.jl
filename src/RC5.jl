@@ -1,5 +1,6 @@
 
 module RC5
+using Blocks
 
 const P8 = 0xb7
 const Q8 = 0x9e
@@ -26,7 +27,7 @@ function Base.show{W}(io::IO, s::State{W})
                        8*sizeof(W), s.r, length(s.k), bytes2hex(s.k)))
 end
 
-function rotatel{W<:Unsigned}(x::W, n::Integer)
+function rotatel{W<:Unsigned}(x::W, n::Unsigned)
     w = 8 * sizeof(W)
     m = n % w
     convert(W, (x << m) | (x >>> (w - m)))
@@ -51,7 +52,7 @@ function expand{W<:Unsigned}(w::Type{W}, r::Uint8, k::Array{Uint8}, p::W, q::W)
     i = j = 0
     a::W, b::W = 0x0, 0x0
     for _ = 1:3*max(t, c)
-        s[i+1] = rotatel(w, s[i+1] + (a + b), 3)
+        s[i+1] = rotatel(w, s[i+1] + (a + b), 0x3)
         a = s[i+1]
         l[j+1] = rotatel(w, l[j+1] + (a + b), a + b)
         b = l[j+1]
@@ -71,11 +72,29 @@ function encrypt{W<:Unsigned}(s::State{W}, a::W, b::W)
     a, b
 end
 
+function encrypt{W<:Unsigned}(s::State{W}, plain)
+    unpack(Uint32,
+           Task() do
+               a = nothing
+               for b in pack(Uint32, plain)
+                   if a == nothing
+                       a = b
+                   else
+                       a, b = encrypt(s, a, b)
+                       produce(a)
+                       produce(b)
+                       a = nothing
+                   end
+               end
+           end)
+end
+
+
 
 function test_rotatel()
-    y = rotatel(0x81, 1)
+    y = rotatel(0x81, 0x1)
     @assert y == 0x03 y
-    y = rotatel(0x81, 9)
+    y = rotatel(0x81, 0x9)
     @assert y == 0x03 y
     y = rotatel(0x81, 0x81)
     @assert y == 0x03 y
@@ -85,6 +104,16 @@ function test_vectors()
     a, b = encrypt(State(Uint32, 0x0c, zeros(Uint8, 16)), 0x00000000, 0x00000000)
     @assert a == 0xeedba521 a
     @assert b == 0x6d8f4b15 b
+    # note that bytes are packed little-endian, while the rc5 paper shows
+    # 32bit integers for the half-blocks.
+    c = collect(Uint8, encrypt(State(Uint32, 0x0c, 
+                                     hex2bytes("00000000000000000000000000000000")),
+                               hex2bytes("0000000000000000")))
+    @assert c == hex2bytes("21a5dbee154b8f6d")
+    c = collect(Uint8, encrypt(State(Uint32, 0x0c, 
+                                     hex2bytes("5269f149d41ba0152497574d7f153125")),
+                               hex2bytes("65c178b284d197cc")))
+    @assert c == hex2bytes("eb44e415da319824")
 end
 
 function tests()
