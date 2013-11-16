@@ -108,9 +108,9 @@ make_keygen(w, r, k; rotate=true) =
 () -> State(w, r, collect(Uint8, take(k, rands(Uint8))), rotate=rotate)
 
 function make_solve_r0{W<:Unsigned}(::Type{W}, k)
-    n = 8 * sizeof(W)
+    w = sizeof(W)
     function solve_r0(e)
-        a, b = pack(W, e(take(2*n, constant(0x0))))
+        a, b = pack(W, e(take(2*w, constant(0x0))))
         s = State(W, 0x0, collect(Uint8, take(k, constant(0x0))))
         s.s[1] = a
         s.s[2] = b
