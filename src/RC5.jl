@@ -30,9 +30,22 @@ State{w}(r, k, expand(w, r, k, P32, Q32), rotate)
 State(w::Type{Uint64}, r::Uint8, k::Array{Uint8}; rotate=true) = 
 State{w}(r, k, expand(w, r, k, P64, Q64), rotate)
 
-function Base.show{W}(io::IO, s::State{W})
-    print(io, @sprintf("RC5-%d/%d/%d 0x%s", 
-                       8*sizeof(W), s.r, length(s.k), bytes2hex(s.k)))
+function pad{W<:Unsigned}(n::W)
+    s = @sprintf("%x", n)
+    while length(s) < sizeof(W)
+        s = "0" + s
+    end
+    s
+end
+
+sprintf_state{W<:Unsigned}(s::State{W}) = join(map(pad, s.s), " ")
+
+function Base.show{W<:Unsigned}(io::IO, s::State{W})
+#    print(io, @sprintf("RC5-%d/%d/%d 0x%s", 
+#                       8*sizeof(W), s.r, length(s.k), bytes2hex(s.k)))
+    print(io, @sprintf("RC5-%d/%d/%d 0x%s\n%s\n", 
+                       8*sizeof(W), s.r, length(s.k), bytes2hex(s.k),
+                       sprintf_state(s)))
 end
 
 function same_state{W<:Unsigned}(s1::State{W}, s2::State{W})
@@ -76,12 +89,27 @@ end
 
 function encrypt{W<:Unsigned}(s::State{W}, a::W, b::W)
     a::W = a + s.s[1]
+    @printf("a = a + s[1] = %x\n", a)
     b::W = b + s.s[2]
+    @printf("b = b + s[2] = %x\n", b)
     for i = 1:s.r
-        a = rotatel(W, a $ b, b)
+        @printf("round %d\n", i)
+        a = a $ b
+        @printf("a = a \$ b = %x\n", a)
+        if s.rotate
+            a = rotatel(W, a, b)
+            @printf("a = a <<< b = %x\n", a)
+        end
         a = a + s.s[2i+1]
-        b = rotatel(W, a $ b, a)
+        @printf("a = a + s[%d] = %x\n", 2i+1, a)
+        b = b $ a
+        @printf("b = b \$ a = %x\n", b)
+        if s.rotate
+            b = rotatel(W, b, a)
+            @printf("b = b <<< a = %x\n", b)
+        end
         b = b + s.s[2i+2]
+        @printf("b = b + s[%d] = %x\n", 2i+2, b)
     end
     a, b
 end
@@ -93,9 +121,10 @@ function encrypt{W<:Unsigned}(s::State{W}, plain)
             if a == nothing
                 a = b
             else
-                a, b = encrypt(s, a, b)
-                produce(a)
-                produce(b)
+                c, d = encrypt(s, a, b)
+                @printf("%x %x -> %x %x\n", a, b, c, d)
+                produce(c)
+                produce(d)
                 a = nothing
             end
         end
@@ -104,12 +133,9 @@ function encrypt{W<:Unsigned}(s::State{W}, plain)
 end
 
 
-make_keygen(w, r, k; rotate=true) = 
-() -> State(w, r, collect(Uint8, take(k, rands(Uint8))), rotate=rotate)
-
 function make_solve_r0{W<:Unsigned}(::Type{W}, k)
     w = sizeof(W)
-    function solve_r0(e)
+    function solve(e)
         a, b = pack(W, e(take(2*w, constant(0x0))))
         s = State(W, 0x0, collect(Uint8, take(k, constant(0x0))))
         s.s[1] = a
@@ -118,10 +144,32 @@ function make_solve_r0{W<:Unsigned}(::Type{W}, k)
     end
 end
 
+function make_solve_r1_noro{W<:Unsigned}(::Type{W}, k)
+    w = sizeof(W)
+    function solve(e)
+        a0, b0, a1, b1 = pack(W, e(unpack(Uint32, Uint32[0x0, 0x0, 0xffffffff, 0xffffffff])))
+        # a0 = ((0 + s[1]) $ 0) + s[3]
+        #    = s[3] + s[1]
+        # a1 = ((0xff + s[1]) $ 0xff) + s[3]
+        #    = ((s[1] - 1) $ 0xff)  + s[3]
+        #    = s[3] - s[1]
+        @printf("%x %x %x %x\n", a0, b0, a1, b1)
+        s3::W = (a0 + a1) >> 1
+        s1::W = (a0 - a1) >> 1
+        @printf("%x %x\n", s1, s3)
+    end
+end
+
+
+make_keygen(w, r, k; rotate=true) = 
+() -> State(w, r, collect(Uint8, take(k, rands(Uint8))), rotate=rotate)
 
 function solutions()
     solve_known_cipher(3, make_solve_r0(Uint32, 0x2), 
                        make_keygen(Uint32, 0x0, 0x2),
+                       encrypt, eq=same_state)
+    solve_known_cipher(3, make_solve_r1_noro(Uint32, 0x2), 
+                       make_keygen(Uint32, 0x1, 0x2, rotate=false),
                        encrypt, eq=same_state)
 end
 
