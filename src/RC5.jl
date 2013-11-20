@@ -153,7 +153,7 @@ function make_solve_r1_noro{W<:Unsigned}(::Type{W}, k)
         #         = ((a0 + c) $ K) - ((a1 + c) $ K)
         # choose a0 and a1 to be same except for 1 bit - can get bit for K
         # except for msb; see Experiment.jl
-        k1::W = 0x0
+        k::W = 0x0
         m::W = 0x1
         for b = 0:(8*sizeof(W)-1)
             while true:
@@ -162,7 +162,7 @@ function make_solve_r1_noro{W<:Unsigned}(::Type{W}, k)
                 ap0, _, ap1, _ = e(W[a0, 0x0, a1, 0x0])
                 d = ap0 - ap1
                 if d == m
-                    k1 = k1 + m
+                    k = k + m
                     break
                 elseif d == -m
                     break
@@ -171,15 +171,13 @@ function make_solve_r1_noro{W<:Unsigned}(::Type{W}, k)
             m = m << 1
         end
         # at this point we know k (s[2]) except for msb (m)
-        k2::W = k + m
-        for k in (k1, k2)
+        for s2 in (k, k+m)
             # if we know s[2], set b0+s[2]=0, b1+s[2]=0xf..f, a0=0, a1=-1
             # a0'-a1' = ((a0+s[1]) $ (b0+s[2])) - ((a1+s[1]) $ (b1+s[2]))
             #         = (s[1] - ((s[1]-1) $ 0xf..f))
             #         = s[1] - (-s[1])
-            ap0, _, ap1, _ = e(W[0x0, -k, -1, -1])
+            ap0, _, ap1, _ = e(W[0x0, -s2, -1, -1])
             s1 = (ap0 - ap1) >> 1
-            s2 = k
             s3 = # TODO
             # check if the current k is correct
             
