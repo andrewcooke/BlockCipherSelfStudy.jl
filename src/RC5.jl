@@ -89,27 +89,27 @@ end
 
 function encrypt{W<:Unsigned}(s::State{W}, a::W, b::W)
     a::W = a + s.s[1]
-    @printf("a = a + s[1] = %x\n", a)
+#    @printf("a = a + s[1] = %x\n", a)
     b::W = b + s.s[2]
-    @printf("b = b + s[2] = %x\n", b)
+#    @printf("b = b + s[2] = %x\n", b)
     for i = 1:s.r
-        @printf("round %d\n", i)
+#        @printf("round %d\n", i)
         a = a $ b
-        @printf("a = a \$ b = %x\n", a)
+#        @printf("a = a \$ b = %x\n", a)
         if s.rotate
             a = rotatel(W, a, b)
-            @printf("a = a <<< b = %x\n", a)
+#            @printf("a = a <<< b = %x\n", a)
         end
         a = a + s.s[2i+1]
-        @printf("a = a + s[%d] = %x\n", 2i+1, a)
+#        @printf("a = a + s[%d] = %x\n", 2i+1, a)
         b = b $ a
-        @printf("b = b \$ a = %x\n", b)
+#        @printf("b = b \$ a = %x\n", b)
         if s.rotate
             b = rotatel(W, b, a)
-            @printf("b = b <<< a = %x\n", b)
+#            @printf("b = b <<< a = %x\n", b)
         end
         b = b + s.s[2i+2]
-        @printf("b = b + s[%d] = %x\n", 2i+2, b)
+#        @printf("b = b + s[%d] = %x\n", 2i+2, b)
     end
     a, b
 end
@@ -144,27 +144,27 @@ function make_solve_r0{W<:Unsigned}(::Type{W}, k)
     end
 end
 
-function make_solve_r1_noro{W<:Unsigned}(::Type{W}, k)
+function make_solve_r1_noro{W<:Unsigned}(::Type{W})
     function solve(e)
         # a' = ((a + s[1]) $ (b + s[2])) + s[3]
         # a0'-a1' = ((a0 + s[1]) $ (b0 + s[2])) - ((a1 + s[1]) $ (b1 + s[2]))
-        # choose b0 == b1
-        # a0'-a1' = ((a0 + s[1]) $ (b + s[2])) - ((a1 + s[1]) $ (b + s[2]))
-        #         = ((a0 + c) $ K) - ((a1 + c) $ K)
-        # choose a0 and a1 to be same except for 1 bit - can get bit for K
+        # choose b0 == b1 = 0
+        # a0'-a1' = ((a0 + s[1]) $ s[2]) - ((a1 + s[1]) $ s[2])
+        # choose a0 and a1 to be same except for 1 bit - can get bit for s[2]
         # except for msb; see Experiment.jl
         k::W = 0x0
         m::W = 0x1
         for b = 0:(8*sizeof(W)-1)
-            while true:
+            while true
                 a0::W = rand(W)
                 a1::W = a0 + m
-                ap0, _, ap1, _ = e(W[a0, 0x0, a1, 0x0])
-                d = ap0 - ap1
-                if d == m
+                ap0, _, ap1, _ = e(unpack(W[a0, 0x0, a1, 0x0]))
+                d = convert(Int64, ap0) - convert(Int64, ap1)
+                println("$d $m")
+                if d == -m
                     k = k + m
                     break
-                elseif d == -m
+                elseif d == m
                     break
                 end
             end
@@ -176,12 +176,22 @@ function make_solve_r1_noro{W<:Unsigned}(::Type{W}, k)
             # a0'-a1' = ((a0+s[1]) $ (b0+s[2])) - ((a1+s[1]) $ (b1+s[2]))
             #         = (s[1] - ((s[1]-1) $ 0xf..f))
             #         = s[1] - (-s[1])
-            ap0, _, ap1, _ = e(W[0x0, -s2, -1, -1])
+            ap0, _, ap1, _ = e(unpack(W[0x0, -s2, -1, -1]))
             s1 = (ap0 - ap1) >> 1
-            s3 = # TODO
-            # check if the current k is correct
-            
+            s3 = ap0 - s1
+            # check if the current s2 is correct
+            a, b = rand(W), rand(W)
+            ap, bp = e(unpack(W[a, b]))
+            if ap == s3 + convert(W, b + s2) $ convert(W, a + s1)
+                # calculate s4 from bp
+                s4 = bp - convert(W, b + s2) $ ap
+                # pack final state
+                s = State(W, 0x1, b"", rotate=false)
+                s.s[1], s.s[2], s.s[3], s.s[4] = s1, s2, s3, s4
+                return s
+            end
         end
+        error("failed to find solution")
     end
 end
 
@@ -193,7 +203,7 @@ function solutions()
     solve_known_cipher(3, make_solve_r0(Uint32, 0x2), 
                        make_keygen(Uint32, 0x0, 0x2),
                        encrypt, eq=same_state)
-    solve_known_cipher(3, make_solve_r1_noro(Uint32, 0x2), 
+    solve_known_cipher(3, make_solve_r1_noro(Uint32), 
                        make_keygen(Uint32, 0x1, 0x2, rotate=false),
                        encrypt, eq=same_state)
 end

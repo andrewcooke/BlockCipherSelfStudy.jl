@@ -28,7 +28,7 @@ function unpack{W<:Unsigned}(::Type{W}, blocks)
         end
     end
 end
-
+unpack{W<:Unsigned}(a::Array{W,1}) = unpack(W, a)
 
 function test_pack()
     b = collect(unpack(Uint32, pack(Uint32, b"123456789")))
