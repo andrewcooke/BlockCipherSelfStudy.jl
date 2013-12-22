@@ -8,6 +8,9 @@ function xor_diff_stats()
     # it seems like one way to do that is to choose X randomly, flip
     # a bit for Y, and look at the stats for the difference.
     n = 8
+    k::Uint8 = rand(Uint8)
+    c::Uint8 = rand(Uint8)
+    @printf("k = %d, c = %d\n", k, c)
     for b in 0:7
         println("bit $b")
         m::Uint8 = 1 << b
@@ -17,13 +20,12 @@ function xor_diff_stats()
                 print(l == 1 ? "+ " : "- ")
                 results = Array(Int64, n)
                 for i = 1:n
-                    k::Uint8 = rand(Uint8)
+		    kk::Uint8
                     if j == 1
-                        k = k & ~m
+                        kk = k & ~m
                     else
-                        k = k | m
+                        kk = k | m
                     end
-                    c::Uint8 = rand(Uint8)
                     x::Uint8 = rand(Uint8)
                     # xor doesn't work below (symmetric results).
                     # subtraction or addition works fine.
@@ -33,8 +35,8 @@ function xor_diff_stats()
                     else
                         y = x - m
                     end
-                    d = convert(Int64, convert(Uint8, x+c) $ k) - convert(Int64, convert(Uint8, y+c) $ k)
-                    # @printf("%x x%x y%x x-y%d c%x k%x d%x\n", m, x, y, convert(Int, x)-convert(Int, y), c, k, d)
+                    d = convert(Int64, convert(Uint8, x+c) $ kk) - convert(Int64, convert(Uint8, y+c) $ kk)
+                    # @printf("%x x%x y%x x-y%d c%x k%x d%x\n", m, x, y, convert(Int, x)-convert(Int, y), c, kk, d)
                     results[i] = d
                 end
                 print(results')

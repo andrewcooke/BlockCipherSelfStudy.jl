@@ -1,6 +1,5 @@
-
 module RC5
-using Blocks, Solve, Tasks
+using Blocks, Solve, Tasks, Debug
 
 const P8 = 0xb7
 const Q8 = 0x9e
@@ -32,18 +31,18 @@ State{w}(r, k, expand(w, r, k, P64, Q64), rotate)
 
 function pad{W<:Unsigned}(n::W)
     s = @sprintf("%x", n)
-    while length(s) < sizeof(W)
-        s = "0" + s
+    while length(s) < 2 * sizeof(W)
+        s = "0$s"
     end
     s
 end
 
-sprintf_state{W<:Unsigned}(s::State{W}) = join(map(pad, s.s), " ")
+sprintf_state{W<:Unsigned}(s::State{W}) = join(map(pad, s.s), "")
 
 function Base.show{W<:Unsigned}(io::IO, s::State{W})
 #    print(io, @sprintf("RC5-%d/%d/%d 0x%s", 
 #                       8*sizeof(W), s.r, length(s.k), bytes2hex(s.k)))
-    print(io, @sprintf("RC5-%d/%d/%d 0x%s\n%s\n", 
+    print(io, @sprintf("RC5-%d/%d/%d 0x%s s:%s\n", 
                        8*sizeof(W), s.r, length(s.k), bytes2hex(s.k),
                        sprintf_state(s)))
 end
@@ -89,27 +88,18 @@ end
 
 function encrypt{W<:Unsigned}(s::State{W}, a::W, b::W)
     a::W = a + s.s[1]
-#    @printf("a = a + s[1] = %x\n", a)
     b::W = b + s.s[2]
-#    @printf("b = b + s[2] = %x\n", b)
     for i = 1:s.r
-#        @printf("round %d\n", i)
         a = a $ b
-#        @printf("a = a \$ b = %x\n", a)
         if s.rotate
             a = rotatel(W, a, b)
-#            @printf("a = a <<< b = %x\n", a)
         end
         a = a + s.s[2i+1]
-#        @printf("a = a + s[%d] = %x\n", 2i+1, a)
         b = b $ a
-#        @printf("b = b \$ a = %x\n", b)
         if s.rotate
             b = rotatel(W, b, a)
-#            @printf("b = b <<< a = %x\n", b)
         end
         b = b + s.s[2i+2]
-#        @printf("b = b + s[%d] = %x\n", 2i+2, b)
     end
     a, b
 end
@@ -117,19 +107,19 @@ end
 function encrypt{W<:Unsigned}(s::State{W}, plain)
     e = Task() do
         a = nothing
-        for b in pack(Uint32, plain)
+        for b in pack(W, plain)
             if a == nothing
                 a = b
             else
                 c, d = encrypt(s, a, b)
-                @printf("%x %x -> %x %x\n", a, b, c, d)
+#                println("$(pad(a)) $(pad(b)) -> $(pad(c)) $(pad(d))")
                 produce(c)
                 produce(d)
                 a = nothing
             end
         end
     end
-    unpack(Uint32, e)
+    unpack(W, e)
 end
 
 
@@ -144,6 +134,14 @@ function make_solve_r0{W<:Unsigned}(::Type{W}, k)
     end
 end
 
+function r1_noro{W<:Unsigned}(a::W, b::W, s1::W, s2::W, s3::W, s4::W)
+    a = a + s1
+    b = b + s2
+    a = (a $ b) + s3
+    b = (b $ a) + s4
+    a, b
+end
+
 function make_solve_r1_noro{W<:Unsigned}(::Type{W})
     function solve(e)
         # a' = ((a + s[1]) $ (b + s[2])) + s[3]
@@ -153,42 +151,63 @@ function make_solve_r1_noro{W<:Unsigned}(::Type{W})
         # choose a0 and a1 to be same except for 1 bit - can get bit for s[2]
         # except for msb; see Experiment.jl
         k::W = 0x0
-        m::W = 0x1
+        m::W = 0x0
         for b = 0:(8*sizeof(W)-1)
+            m = m == 0 ? 1 : m << 1
             while true
                 a0::W = rand(W)
-                a1::W = a0 + m
-                ap0, _, ap1, _ = e(unpack(W[a0, 0x0, a1, 0x0]))
+                a1::W = a0 - m  # minus here
+                ap0, _, ap1, _ = pack(W, e(unpack(W[a0, 0x0, a1, 0x0])))
                 d = convert(Int64, ap0) - convert(Int64, ap1)
-                println("$d $m")
-                if d == -m
-                    k = k + m
+                if d == m  # subtract and find, so bit zero
+                    println("bit $b of s2 0: $(pad(k))")
                     break
-                elseif d == m
+                end
+                a1 = a0 + m  # plus here
+                ap0, _, ap1, _ = pack(W, e(unpack(W[a0, 0x0, a1, 0x0])))
+                d = convert(Int64, ap0) - convert(Int64, ap1)
+                if d == m  # add and find, so bit one
+                    k = k+m
+                    println("bit $b of s2 1: $(pad(k))")
                     break
                 end
             end
-            m = m << 1
         end
         # at this point we know k (s[2]) except for msb (m)
-        for s2 in (k, k+m)
-            # if we know s[2], set b0+s[2]=0, b1+s[2]=0xf..f, a0=0, a1=-1
+        println("$k $m")
+        for s2::W in (k, k+m)
+            # if we know s[2], set b0+s[2]=0, b1+s[2]=0xf..f, a0=0, a1=0
             # a0'-a1' = ((a0+s[1]) $ (b0+s[2])) - ((a1+s[1]) $ (b1+s[2]))
-            #         = (s[1] - ((s[1]-1) $ 0xf..f))
-            #         = s[1] - (-s[1])
-            ap0, _, ap1, _ = e(unpack(W[0x0, -s2, -1, -1]))
-            s1 = (ap0 - ap1) >> 1
-            s3 = ap0 - s1
-            # check if the current s2 is correct
-            a, b = rand(W), rand(W)
-            ap, bp = e(unpack(W[a, b]))
-            if ap == s3 + convert(W, b + s2) $ convert(W, a + s1)
-                # calculate s4 from bp
-                s4 = bp - convert(W, b + s2) $ ap
-                # pack final state
-                s = State(W, 0x1, b"", rotate=false)
-                s.s[1], s.s[2], s.s[3], s.s[4] = s1, s2, s3, s4
-                return s
+            #         = (s[1] - (s[1] $ 0xf..f))
+            #         = s[1] - (-s[1]-1)
+            ap0, _, ap1, _ = pack(W, e(unpack(W[0x0, -s2, 0x0, -1-s2])))
+            println("a0' $(pad(ap0))  a1' $(pad(ap1))")
+            s1l7::W = (ap0 - ap1 - 1) & 0xff >> 1  # don't know top bit
+            for s1::W in (s1l7, s1l7+0x80)
+                s3::W = ap0 - s1
+		u::W, v::W = rand(W), rand(W)
+                up::W, vp::W = pack(W, e(unpack(W[u, v])))
+		s4::W = convert(W, vp - (convert(W, v + s2) $ up))
+                println("if s2=$(pad(s2)) and s1=$(pad(s1)) then s3=$(pad(s3)) and s4=$(pad(s4))")
+                # check if the current s1,2,3 are ok
+                i, ok = 0, true
+                while ok && i < 10
+		    u, v = rand(W), rand(W)
+                    up, vp = pack(W, e(unpack(W[u, v])))
+                    upp::W, vpp::W = r1_noro(u, v, s1, s2, s3, s4)
+		    println("$(pad(up)) $(pad(upp)) $(pad(vp)) $(pad(vpp))")
+                    ok = up == upp && vp == vpp
+		    i = i+1
+		end
+		if ok
+                   # pack final state
+                   s = State(W, 0x1, Uint8[0x00], rotate=false)
+                   s.s[1], s.s[2], s.s[3], s.s[4] = s1, s2, s3, s4
+		   println("result $s")
+                   return s
+		else
+		   println("bad check")
+                end
             end
         end
         error("failed to find solution")
@@ -200,12 +219,15 @@ make_keygen(w, r, k; rotate=true) =
 () -> State(w, r, collect(Uint8, take(k, rands(Uint8))), rotate=rotate)
 
 function solutions()
-    solve_known_cipher(3, make_solve_r0(Uint32, 0x2), 
-                       make_keygen(Uint32, 0x0, 0x2),
+#    solve_known_cipher(3, make_solve_r0(Uint32, 0x2), 
+#                       make_keygen(Uint32, 0x0, 0x2),
+#                       encrypt, eq=same_state)
+    solve_known_cipher(3, make_solve_r1_noro(Uint8), 
+                       make_keygen(Uint8, 0x1, 0x2, rotate=false),
                        encrypt, eq=same_state)
-    solve_known_cipher(3, make_solve_r1_noro(Uint32), 
-                       make_keygen(Uint32, 0x1, 0x2, rotate=false),
-                       encrypt, eq=same_state)
+#    solve_known_cipher(3, make_solve_r1_noro(Uint32), 
+#                       make_keygen(Uint32, 0x1, 0x2, rotate=false),
+#                       encrypt, eq=same_state)
 end
 
 
@@ -237,12 +259,20 @@ function test_vectors()
     @assert c == hex2bytes("eb44e415da319824")
 end
 
+function test_8()
+    # just checking the code runs (correct values unknown)
+    a, b = encrypt(State(Uint8, 0x0c, zeros(Uint8, 16)), 0x00, 0x00)
+    @assert a == 0xa6 a
+    @assert b == 0xea b
+end
+
 function tests()
     test_rotatel()
     test_vectors()
+    test_8()
 end
 
-tests()
+#tests()
 solutions()
 
 end
