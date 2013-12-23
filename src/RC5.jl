@@ -42,7 +42,7 @@ sprintf_state{W<:Unsigned}(s::State{W}) = join(map(pad, s.s), "")
 function Base.show{W<:Unsigned}(io::IO, s::State{W})
 #    print(io, @sprintf("RC5-%d/%d/%d 0x%s", 
 #                       8*sizeof(W), s.r, length(s.k), bytes2hex(s.k)))
-    print(io, @sprintf("RC5-%d/%d/%d 0x%s s:%s\n", 
+    print(io, @sprintf("RC5-%d/%d/%d 0x%s s:%s", 
                        8*sizeof(W), s.r, length(s.k), bytes2hex(s.k),
                        sprintf_state(s)))
 end
@@ -160,7 +160,7 @@ function make_solve_r1_noro{W<:Unsigned}(::Type{W})
                 ap0, _, ap1, _ = pack(W, e(unpack(W[a0, 0x0, a1, 0x0])))
                 d = convert(Int64, ap0) - convert(Int64, ap1)
                 if d == m  # subtract and find, so bit zero
-                    println("bit $b of s2 0: $(pad(k))")
+ #                   println("bit $b of s2 0: $(pad(k))")
                     break
                 end
                 a1 = a0 + m  # plus here
@@ -168,21 +168,20 @@ function make_solve_r1_noro{W<:Unsigned}(::Type{W})
                 d = convert(Int64, ap0) - convert(Int64, ap1)
                 if d == m  # add and find, so bit one
                     k = k+m
-                    println("bit $b of s2 1: $(pad(k))")
+#                    println("bit $b of s2 1: $(pad(k))")
                     break
                 end
             end
         end
         # at this point we know k (s[2]) except for msb (m)
-        println("$k $m")
         for s2::W in (k, k+m)
             # if we know s[2], set b0+s[2]=0, b1+s[2]=0xf..f, a0=0, a1=0
             # a0'-a1' = ((a0+s[1]) $ (b0+s[2])) - ((a1+s[1]) $ (b1+s[2]))
             #         = (s[1] - (s[1] $ 0xf..f))
             #         = s[1] - (-s[1]-1)
             ap0, _, ap1, _ = pack(W, e(unpack(W[0x0, -s2, 0x0, -1-s2])))
-            println("a0' $(pad(ap0))  a1' $(pad(ap1))")
-            s1l7::W = (ap0 - ap1 - 1) & 0xff >> 1  # don't know top bit
+#            println("a0' $(pad(ap0))  a1' $(pad(ap1))")
+            s1l7::W = convert(W, ap0 - ap1 - 1) >> 1  # don't know top bit
             for s1::W in (s1l7, s1l7+0x80)
                 s3::W = ap0 - s1
 		u::W, v::W = rand(W), rand(W)
@@ -195,7 +194,7 @@ function make_solve_r1_noro{W<:Unsigned}(::Type{W})
 		    u, v = rand(W), rand(W)
                     up, vp = pack(W, e(unpack(W[u, v])))
                     upp::W, vpp::W = r1_noro(u, v, s1, s2, s3, s4)
-		    println("$(pad(up)) $(pad(upp)) $(pad(vp)) $(pad(vpp))")
+#		    println("$(pad(up)) $(pad(upp)) $(pad(vp)) $(pad(vpp))")
                     ok = up == upp && vp == vpp
 		    i = i+1
 		end
@@ -219,15 +218,15 @@ make_keygen(w, r, k; rotate=true) =
 () -> State(w, r, collect(Uint8, take(k, rands(Uint8))), rotate=rotate)
 
 function solutions()
-#    solve_known_cipher(3, make_solve_r0(Uint32, 0x2), 
-#                       make_keygen(Uint32, 0x0, 0x2),
-#                       encrypt, eq=same_state)
+    solve_known_cipher(3, make_solve_r0(Uint32, 0x2), 
+                       make_keygen(Uint32, 0x0, 0x2),
+                       encrypt, eq=same_state)
     solve_known_cipher(3, make_solve_r1_noro(Uint8), 
                        make_keygen(Uint8, 0x1, 0x2, rotate=false),
-                       encrypt, eq=same_state)
-#    solve_known_cipher(3, make_solve_r1_noro(Uint32), 
-#                       make_keygen(Uint32, 0x1, 0x2, rotate=false),
-#                       encrypt, eq=same_state)
+                       encrypt, eq=same_ctext(16, encrypt))
+    solve_known_cipher(3, make_solve_r1_noro(Uint32), 
+                       make_keygen(Uint32, 0x1, 0x2, rotate=false),
+                       encrypt, eq=same_ctext(16, encrypt))
 end
 
 
@@ -272,7 +271,7 @@ function tests()
     test_8()
 end
 
-#tests()
+tests()
 solutions()
 
 end

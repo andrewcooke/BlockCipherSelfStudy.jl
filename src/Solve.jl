@@ -1,6 +1,6 @@
 
 module Solve
-export solve_known_cipher, rands
+export solve_known_cipher, rands, same_ctext
 
 using Tasks
 
@@ -19,5 +19,13 @@ end
 
 rands{T<:Integer}(::Type{T}) = repeat(() -> rand(T))
 
+function same_ctext(n, encrypt)
+    function eq(k1, k2)
+        p = collect(Uint8, take(n, rands(Uint8)))
+        c1 = collect(Uint8, encrypt(k1, p))
+        c2 = collect(Uint8, encrypt(k2, p))
+        c1 == c2
+    end
 end
 
+end
