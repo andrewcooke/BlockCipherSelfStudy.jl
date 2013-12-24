@@ -1,6 +1,6 @@
 
 module Blocks
-export pack, unpack
+export pack, unpack, group
 
 function pack{W<:Unsigned}(::Type{W}, bytes)
     block::W = 0x0
@@ -29,6 +29,23 @@ function unpack{W<:Unsigned}(::Type{W}, blocks)
     end
 end
 unpack{W<:Unsigned}(a::Array{W,1}) = unpack(W, a)
+
+function group(n, seq)
+    tmp = cell(n)
+    Task() do
+        i = 1
+        for s in seq
+            tmp[i] = s
+            if i == n
+                produce(tuple(tmp...))
+                i = 1
+            else
+                i = i + 1
+            end
+        end
+    end
+end
+
 
 function test_pack()
     b = collect(unpack(Uint32, pack(Uint32, b"123456789")))

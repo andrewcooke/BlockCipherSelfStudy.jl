@@ -1,10 +1,10 @@
 
 module Solve
-export solve_known_cipher, rands, same_ctext
+export from_known_ptext, from_known_state, rands, same_ctext
 
 using Tasks
 
-function solve_known_cipher(n, solve, keygen, encrypt; eq= ==)
+function from_known_ptext(n, solve, keygen, encrypt; eq= ==)
     println(solve)
     for i = 1:n
         k1 = keygen()
@@ -14,6 +14,20 @@ function solve_known_cipher(n, solve, keygen, encrypt; eq= ==)
         k2 = solve(e)
         t = toq()
         @printf("%d: %s %s\n", i, k1, eq(k1, k2))
+    end
+end
+
+function from_known_state(n, solve, keygen, test)
+    # this isn't as rigorous as the test above - we pass the state 
+    # explicitly - but it can be more efficient.
+    println(solve)
+    for i = 1:n
+        k1 = keygen()
+        println("target $k1")
+        tic()
+        oracle = solve(k1)
+        t = toq()
+        @printf("%d: %s %s\n", i, k1, test(k1, oracle))
     end
 end
 

@@ -109,17 +109,11 @@ end
 
 function encrypt{W<:Unsigned}(s::State{W}, plain)
     e = Task() do
-        a = nothing
-        for b in pack(W, plain)
-            if a == nothing
-                a = b
-            else
-                c, d = encrypt(s, a, b)
-#                println("$(pad(a)) $(pad(b)) -> $(pad(c)) $(pad(d))")
-                produce(c)
-                produce(d)
-                a = nothing
-            end
+        for ab in group(2, pack(W, plain))
+            c, d = encrypt(s, ab...)
+#            println("$(pad(a)) $(pad(b)) -> $(pad(c)) $(pad(d))")
+            produce(c)
+            produce(d)
         end
     end
     unpack(W, e)
@@ -223,21 +217,75 @@ function make_solve_r1_noro{W<:Unsigned}(::Type{W})
 end
 
 
+# ---- lowest bits directly
+
+function tabulate{W<:Unsigned, T<:Unsigned}(::Type{T}, nbits, s::State{W})
+    @assert nbits <= 8 * sizeof(T)  # storage must be big enough
+    @assert sizeof(T) <= sizeof(W)
+    n = 2 ^ nbits
+    m = n - 1
+    table = Array(T, n, n, 2)
+#    table = zeros(T, n, n, 2)
+    for i in 0:(n-1)
+        a = convert(W, i)
+        for j in 0:(n-1)
+            b = convert(W, j)
+            ap, bp = encrypt(s, a, b)
+            ap, bp = ap & m, bp & m
+            println("$a $b <- $ap $bp")
+#            @assert table[ap+1, bp+1, 1] == 0
+#            @assert table[ap+1, bp+1, 2] == 0
+            table[ap+1, bp+1, 1] = convert(T, a)
+            table[ap+1, bp+1, 2] = convert(T, b)
+        end
+    end
+    mask::T = convert(T, 2 ^ nbits - 1)
+    function detabulate(ctext)
+        Task() do
+            for ab in group(2, pack(W, ctext))
+                a::W, b::W = ab
+                ap, bp = a & mask, b & mask
+                c, d = table[ap+1, bp+1, 1:2]
+                println("$a $b -> $ap $bp -> $c $d")
+                produce((a & ~mask) | c)
+                produce((b & ~mask) | d)
+            end
+        end
+    end
+end
+
+function make_check_table(nbits, nbytes)
+    function check_table{W<:Unsigned}(s::State{W}, detab)
+        ptext = take(nbytes, rands(Uint8))
+        ptextw1 = pack(W, ptext)
+        ptextw2 = detab(encrypt(s, ptext))
+        m::W = 2^nbits - 1
+        for (p1, p2) in zip(ptextw1, ptextw2)
+            println("$p1/$(p1 & m) $p2/$(p2 & m)")
+            @assert p1 & m == p2 & m
+        end
+    end
+end
+
+
 # ---- validate solutions
 
 make_keygen(w, r, k; rotate=true) = 
 () -> State(w, r, collect(Uint8, take(k, rands(Uint8))), rotate=rotate)
 
 function solutions()
-    solve_known_cipher(3, make_solve_r0(Uint32, 0x2), 
-                       make_keygen(Uint32, 0x0, 0x2),
-                       encrypt, eq=same_state)
-    solve_known_cipher(3, make_solve_r1_noro(Uint8), 
-                       make_keygen(Uint8, 0x1, 0x2, rotate=false),
-                       encrypt, eq=same_ctext(16, encrypt))
-    solve_known_cipher(3, make_solve_r1_noro(Uint32), 
-                       make_keygen(Uint32, 0x1, 0x2, rotate=false),
-                       encrypt, eq=same_ctext(16, encrypt))
+#    from_known_ptext(3, make_solve_r0(Uint32, 0x2), 
+#                     make_keygen(Uint32, 0x0, 0x2),
+#                     encrypt, eq=same_state)
+#    from_known_ptext(3, make_solve_r1_noro(Uint8), 
+#                     make_keygen(Uint8, 0x1, 0x2, rotate=false),
+#                     encrypt, eq=same_ctext(16, encrypt))
+#    from_known_ptext(3, make_solve_r1_noro(Uint32), 
+#                     make_keygen(Uint32, 0x1, 0x2, rotate=false),
+#                     encrypt, eq=same_ctext(16, encrypt))
+    from_known_state(3, k -> tabulate(Uint8, 1, k), 
+                     make_keygen(Uint8, 0x1, 0x2, rotate=false),
+                     make_check_table(1, 16))
 end
 
 
