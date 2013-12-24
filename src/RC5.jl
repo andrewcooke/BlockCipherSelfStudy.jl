@@ -111,7 +111,7 @@ function encrypt{W<:Unsigned}(s::State{W}, plain)
     e = Task() do
         for ab in group(2, pack(W, plain))
             c, d = encrypt(s, ab...)
-#            println("$(pad(a)) $(pad(b)) -> $(pad(c)) $(pad(d))")
+            println("$(pad(ab[1])) $(pad(ab[2])) -> $(pad(c)) $(pad(d))")
             produce(c)
             produce(d)
         end
@@ -230,25 +230,24 @@ function tabulate{W<:Unsigned, T<:Unsigned}(::Type{T}, nbits, s::State{W})
         a = convert(W, i)
         for j in 0:(n-1)
             b = convert(W, j)
-            ap, bp = encrypt(s, a, b)
+            ap::W, bp::W = encrypt(s, a, b)
             ap, bp = ap & m, bp & m
-            println("$a $b <- $ap $bp")
+#            println("$(pad(a)) $(pad(b)) <- $(pad(ap)) $(pad(bp))")
 #            @assert table[ap+1, bp+1, 1] == 0
 #            @assert table[ap+1, bp+1, 2] == 0
             table[ap+1, bp+1, 1] = convert(T, a)
             table[ap+1, bp+1, 2] = convert(T, b)
         end
     end
-    mask::T = convert(T, 2 ^ nbits - 1)
     function detabulate(ctext)
         Task() do
             for ab in group(2, pack(W, ctext))
                 a::W, b::W = ab
-                ap, bp = a & mask, b & mask
-                c, d = table[ap+1, bp+1, 1:2]
-                println("$a $b -> $ap $bp -> $c $d")
-                produce((a & ~mask) | c)
-                produce((b & ~mask) | d)
+                ap::W, bp::W = a & m, b & m
+                c::W, d::W = table[ap+1, bp+1, 1:2]
+                println("$(pad(a)) $(pad(b)) -> $(pad(ap)) $(pad(bp)) -> $(pad(c)) $(pad(d))")
+                produce(convert(W, (a & ~m) | c))
+                produce(convert(W, (b & ~m) | d))
             end
         end
     end
@@ -256,14 +255,16 @@ end
 
 function make_check_table(nbits, nbytes)
     function check_table{W<:Unsigned}(s::State{W}, detab)
-        ptext = take(nbytes, rands(Uint8))
+        ptext = collect(Uint8, take(nbytes, rands(Uint8)))
         ptextw1 = pack(W, ptext)
         ptextw2 = detab(encrypt(s, ptext))
         m::W = 2^nbits - 1
+        ok = true
         for (p1, p2) in zip(ptextw1, ptextw2)
-            println("$p1/$(p1 & m) $p2/$(p2 & m)")
-            @assert p1 & m == p2 & m
+            println("$(pad(p1))/$(pad(p1 & m)) $(pad(p2))/$(pad(p2 & m))")
+            ok = ok && p1 & m == p2 & m
         end
+        ok
     end
 end
 
@@ -286,6 +287,9 @@ function solutions()
     from_known_state(3, k -> tabulate(Uint8, 1, k), 
                      make_keygen(Uint8, 0x1, 0x2, rotate=false),
                      make_check_table(1, 16))
+    from_known_state(3, k -> tabulate(Uint16, 9, k), 
+                     make_keygen(Uint32, 0x3, 0x10, rotate=false),
+                     make_check_table(9, 16))
 end
 
 
