@@ -13,7 +13,9 @@ function from_known_ptext(n, solve, keygen, encrypt; eq= ==)
         tic()
         k2 = solve(e)
         t = toq()
-        @printf("%d: %s %s\n", i, k1, eq(k1, k2))
+        ok = eq(k1, k2)
+        @printf("%d: %s %s\n", i, k1, ok)
+        @assert ok
     end
 end
 
@@ -27,7 +29,9 @@ function from_known_state(n, solve, keygen, test)
         tic()
         oracle = solve(k1)
         t = toq()
-        @printf("%d: %s %s\n", i, k1, test(k1, oracle))
+        ok = test(k1, oracle)
+        @printf("%d: %s %s\n", i, k1, ok)
+        @assert ok
     end
 end
 
