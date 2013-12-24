@@ -1,6 +1,9 @@
 module RC5
 using Blocks, Solve, Tasks, Debug
 
+
+# ---- RC5 cipher support (state, encryption, etc)
+
 const P8 = 0xb7
 const Q8 = 0x9e
 const P16 = 0xb7e1
@@ -123,6 +126,8 @@ function encrypt{W<:Unsigned}(s::State{W}, plain)
 end
 
 
+# ---- 0 round solution
+
 function make_solve_r0{W<:Unsigned}(::Type{W}, k)
     w = sizeof(W)
     function solve(e)
@@ -133,6 +138,9 @@ function make_solve_r0{W<:Unsigned}(::Type{W}, k)
         s
     end
 end
+
+
+# ---- 1 round no rotation solution
 
 function r1_noro{W<:Unsigned}(a::W, b::W, s1::W, s2::W, s3::W, s4::W)
     a = a + s1
@@ -152,6 +160,7 @@ function make_solve_r1_noro{W<:Unsigned}(::Type{W})
         # except for msb; see Experiment.jl
         k::W = 0x0
         m::W = 0x0
+        # find bit using differences (see Experiment.jl)
         for b = 0:(8*sizeof(W)-1)
             m = m == 0 ? 1 : m << 1
             while true
@@ -214,6 +223,8 @@ function make_solve_r1_noro{W<:Unsigned}(::Type{W})
 end
 
 
+# ---- validate solutions
+
 make_keygen(w, r, k; rotate=true) = 
 () -> State(w, r, collect(Uint8, take(k, rands(Uint8))), rotate=rotate)
 
@@ -229,6 +240,8 @@ function solutions()
                        encrypt, eq=same_ctext(16, encrypt))
 end
 
+
+# ---- tests
 
 function test_rotatel()
     y = rotatel(0x81, 0x1)
@@ -270,6 +283,7 @@ function tests()
     test_vectors()
     test_8()
 end
+
 
 tests()
 solutions()
