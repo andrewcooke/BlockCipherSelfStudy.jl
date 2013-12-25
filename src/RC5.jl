@@ -219,7 +219,7 @@ end
 
 # ---- lowest bits directly
 
-function tabulate{W<:Unsigned, T<:Unsigned}(::Type{T}, nbits, s::State{W})
+function make_tabulate{W<:Unsigned, T<:Unsigned}(::Type{T}, nbits, ::Type{W})
 
     # for any number of rounds, or key size, but no rotation, we can
     # tabulate the the first nbits of each half-block and use them as
@@ -230,32 +230,53 @@ function tabulate{W<:Unsigned, T<:Unsigned}(::Type{T}, nbits, s::State{W})
     @assert sizeof(T) <= sizeof(W)
     n = 2 ^ nbits
     m = n - 1
-    table = Array(T, n, n, 2)
-#    table = zeros(T, n, n, 2)
-    for i in 0:(n-1)
-        a = convert(W, i)
-        for j in 0:(n-1)
-            b = convert(W, j)
-            ap::W, bp::W = encrypt(s, a, b)
+
+    function ptext()
+        # rewrote this to use the framework supported by from_known_ptext;
+        # it was much faster when computing a table directly, using the
+        # other encrypt method.
+        Task() do
+            for i in 0:(n-1)
+                a = convert(W, i)
+                for j in 0:(n-1)
+                    b = convert(W, j)
+                    for aa in unpack(W, a)
+                        produce(aa)
+                    end
+                    for bb in unpack(W, b)
+                        produce(bb)
+                    end
+                end
+            end
+        end
+    end
+        
+    function tabulate(e)
+
+        # this returns a detabulate function rather than a key and so
+        # should be used with check_table below
+
+        table = Array(T, n, n, 2)
+        ab = group(2, pack(W, ptext()))
+        for (ap, bp) in group(2, pack(W, e(ptext())))
+            a, b = consume(ab)
             ap, bp = ap & m, bp & m
 #            println("$(pad(a)) $(pad(b)) <- $(pad(ap)) $(pad(bp))")
-#            @assert table[ap+1, bp+1, 1] == 0
-#            @assert table[ap+1, bp+1, 2] == 0
             table[ap+1, bp+1, 1] = convert(T, a)
             table[ap+1, bp+1, 2] = convert(T, b)
         end
-    end
 
-    function detabulate(ctext)
-        # wrap the result in a function that does the lookup
-        Task() do
-            for ab in group(2, pack(W, ctext))
-                a::W, b::W = ab
-                ap::W, bp::W = a & m, b & m
-                c::W, d::W = table[ap+1, bp+1, 1:2]
-#                println("$(pad(a)) $(pad(b)) -> $(pad(ap)) $(pad(bp)) -> $(pad(c)) $(pad(d))")
-                produce(convert(W, (a & ~m) | c))
-                produce(convert(W, (b & ~m) | d))
+        function detabulate(ctext)
+            # wrap the result in a function that does the lookup
+            Task() do
+                for ab in group(2, pack(W, ctext))
+                    a::W, b::W = ab
+                    ap::W, bp::W = a & m, b & m
+                    c::W, d::W = table[ap+1, bp+1, 1:2]
+ #                   println("$(pad(a)) $(pad(b)) -> $(pad(ap)) $(pad(bp)) -> $(pad(c)) $(pad(d))")
+                    produce(convert(W, (a & ~m) | c))
+                    produce(convert(W, (b & ~m) | d))
+                end
             end
         end
     end
@@ -283,21 +304,23 @@ make_keygen(w, r, k; rotate=true) =
 () -> State(w, r, collect(Uint8, take(k, rands(Uint8))), rotate=rotate)
 
 function solutions()
-    from_known_ptext(3, make_solve_r0(Uint32, 0x2), 
-                     make_keygen(Uint32, 0x0, 0x2),
-                     encrypt, eq=same_state)
-    from_known_ptext(3, make_solve_r1_noro(Uint8), 
+#    from_known_ptext(3, make_solve_r0(Uint32, 0x2), 
+#                     make_keygen(Uint32, 0x0, 0x2),
+#                     encrypt, eq=same_state)
+#    from_known_ptext(3, make_solve_r1_noro(Uint8), 
+#                     make_keygen(Uint8, 0x1, 0x2, rotate=false),
+#                     encrypt, eq=same_ctext(16, encrypt))
+#    from_known_ptext(3, make_solve_r1_noro(Uint32), 
+#                     make_keygen(Uint32, 0x1, 0x2, rotate=false),
+#                     encrypt, eq=same_ctext(16, encrypt))
+    # tabulate first bit (only) in 8-bit table with 8-bit blocks
+    from_known_ptext(3, make_tabulate(Uint8, 1, Uint8), 
                      make_keygen(Uint8, 0x1, 0x2, rotate=false),
-                     encrypt, eq=same_ctext(16, encrypt))
-    from_known_ptext(3, make_solve_r1_noro(Uint32), 
-                     make_keygen(Uint32, 0x1, 0x2, rotate=false),
-                     encrypt, eq=same_ctext(16, encrypt))
-    from_known_state(3, k -> tabulate(Uint8, 1, k), 
-                     make_keygen(Uint8, 0x1, 0x2, rotate=false),
-                     make_check_table(1, 16))
-    from_known_state(3, k -> tabulate(Uint16, 9, k), 
+                     encrypt, eq=make_check_table(1, 16))
+    # tabulate 9 bits in 16-bit table with 32-bit blocks
+    from_known_ptext(3, make_tabulate(Uint16, 9, Uint32), 
                      make_keygen(Uint32, 0x3, 0x10, rotate=false),
-                     make_check_table(9, 16))
+                     encrypt, eq=make_check_table(9, 16))
 end
 
 

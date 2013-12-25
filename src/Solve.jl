@@ -19,22 +19,6 @@ function from_known_ptext(n, solve, keygen, encrypt; eq= ==)
     end
 end
 
-function from_known_state(n, solve, keygen, test)
-    # this isn't as rigorous as the test above - we pass the state 
-    # explicitly - but it can be more efficient.
-    println(solve)
-    for i = 1:n
-        k1 = keygen()
-        println("target $k1")
-        tic()
-        oracle = solve(k1)
-        t = toq()
-        ok = test(k1, oracle)
-        @printf("%d: %s %s\n", i, k1, ok)
-        @assert ok
-    end
-end
-
 rands{T<:Integer}(::Type{T}) = repeat(() -> rand(T))
 
 function same_ctext(n, encrypt)
