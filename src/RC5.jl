@@ -32,14 +32,6 @@ State{w}(r, k, expand(w, r, k, P32, Q32), rotate)
 State(w::Type{Uint64}, r::Uint8, k::Array{Uint8}; rotate=true) = 
 State{w}(r, k, expand(w, r, k, P64, Q64), rotate)
 
-function pad{W<:Unsigned}(n::W)
-    s = @sprintf("%x", n)
-    while length(s) < 2 * sizeof(W)
-        s = "0$s"
-    end
-    s
-end
-
 sprintf_state{W<:Unsigned}(s::State{W}) = join(map(pad, s.s), "")
 
 function Base.show{W<:Unsigned}(io::IO, s::State{W})
@@ -246,13 +238,19 @@ function make_solve_lbits{W<:Unsigned, T<:Unsigned}(::Type{T}, nbits, ::Type{W})
             end
         end
 
-        for ab in group(2, pack(W, ctext))
-            a::W, b::W = ab
-            ap::W, bp::W = a & m, b & m
-            c::W, d::W = table[ap+1, bp+1, 1:2]
-#            println("$(pad(a)) $(pad(b)) -> $(pad(ap)) $(pad(bp)) -> $(pad(c)) $(pad(d))")
-            produce(convert(W, (a & ~m) | c))
-            produce(convert(W, (b & ~m) | d))
+        Task() do
+            for ab in group(2, pack(W, ctext))
+                a::W, b::W = ab
+                ap::W, bp::W = a & m, b & m
+                c::W, d::W = table[ap+1, bp+1, 1:2]
+#                println("$(pad(a)) $(pad(b)) -> $(pad(ap)) $(pad(bp)) -> $(pad(c)) $(pad(d))")
+                for x in unpack(W, convert(W, (a & ~m) | c))
+                    produce(x)
+                end
+                for x in unpack(W, convert(W, (b & ~m) | d))
+                    produce(x)
+                end
+            end
         end
     end
 end
@@ -304,14 +302,15 @@ function solutions()
     # tabulate first bit (only) in 8-bit table with 8-bit blocks
     solve_for_ptext(3, make_solve_lbits(Uint8, 1, Uint8), 
                     make_keygen(Uint8, 0x1, 0x2, rotate=false),
-                    k -> p -> encrypt(k, p), 
-                    eq=same_ptext(1),
+                    k -> p -> encrypt(k, p), 16,
+                    eq=same_ptext(Uint32, 1),
                     encrypt2=k -> (a, b) -> encrypt(k, a, b))
     # tabulate 9 bits in 16-bit table with 32-bit blocks
-#    from_known_ptext(3, make_tabulate(Uint16, 9, Uint32), 
-#                     make_keygen(Uint32, 0x3, 0x10, rotate=false),
-#                     k -> (a, b) -> encrypt(k, a, b), 
-#                     eq=make_check_table(9, 16))
+    solve_for_ptext(3, make_solve_lbits(Uint16, 9, Uint32), 
+                    make_keygen(Uint32, 0x3, 0x10, rotate=false),
+                    k -> p -> encrypt(k, p), 32,
+                    eq=same_ptext(Uint32, 9),
+                    encrypt2=k -> (a, b) -> encrypt(k, a, b))
 end
 
 

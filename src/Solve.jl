@@ -2,7 +2,7 @@
 module Solve
 export solve_for_key, solve_for_ptext, rands, same_ctext, same_ptext
 
-using Tasks
+using Tasks, Blocks
 
 function solve_for_key(n, solve, keygen, encrypt; eq= ==)
     for i = 1:n
@@ -23,8 +23,8 @@ function solve_for_ptext(n, solve, keygen, encrypt, len;
         e2 = encrypt2 == nothing ? e1 : encrypt2(k)
         p1 = collect(Uint8, take(len, rands(Uint8)))
         println("target $(bytes2hex(p1))")
-        c = e(p1)
-        p2 = solve(c, e2)
+        c = e1(p1)
+        p2 = collect(Uint8, solve(c, e2))
         ok = eq(p1, p2)
         println("$i: $(bytes2hex(p2)) $ok")
         @assert ok
@@ -42,11 +42,12 @@ function same_ctext(n, encrypt)
     end
 end
 
-function same_ptext(nbits)
+function same_ptext{W<:Unsigned}(::Type{W}, nbits)
     function eq(p1, p2)
-        m = 2^nbits - 1
+        m::W = 2^nbits - 1
         ok = true
-        for (a, b) in zip(p1, p2)
+        for (a::W, b::W) in zip(pack(W, p1), pack(W, p2))
+#            println("$(pad(a))/$(pad(a & m)) $(pad(b))/$(pad(b & m))")
             ok = ok && a & m == b & m
         end
         ok

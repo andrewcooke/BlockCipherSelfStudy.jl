@@ -1,6 +1,6 @@
 
 module Blocks
-export pack, unpack, group
+export pack, unpack, group, pad
 
 function pack{W<:Unsigned}(::Type{W}, bytes)
     block::W = 0x0
@@ -44,6 +44,14 @@ function group(n, seq)
             end
         end
     end
+end
+
+function pad{W<:Unsigned}(n::W)
+    s = @sprintf("%x", n)
+    while length(s) < 2 * sizeof(W)
+        s = "0$s"
+    end
+    s
 end
 
 
