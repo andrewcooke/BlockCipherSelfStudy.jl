@@ -274,6 +274,11 @@ end
 # ---- adaptive search bit by bit from lsb
 
 function make_search{W<:Unsigned}(::Type{W})
+
+    # full adaptive decryption.  given two half-blocks we test-encrypt
+    # possible combinations for the lsb, then the next bit, etc, until
+    # we have all bits.
+
     function solve(ctext, e)
         Task() do
             for (a, b) in group(2, pack(W, ctext))
