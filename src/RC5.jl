@@ -274,7 +274,27 @@ end
 # ---- adaptive search bit by bit from lsb
 
 function make_search{W<:Unsigned}(::Type{W})
-    function search(e)
+    function solve(ctext, e)
+        Task() do
+            for (a, b) in group(2, pack(W, ctext))
+                bit::W = 1
+                ap::W, bp::W = 0x0, 0x0
+                for i in 1:8*sizeof(W)
+                    for c::W in [0x0, bit]
+                        for d::W in [0x0, bit]
+                            cp, dp = e(ap | c, bp | d)
+                            if cp & bit == a & bit && dp & bit == b & bit
+                                ap, bp = ap | c, bp | d
+                            end
+                        end
+                    end
+                    bit = bit << 1
+                end
+#                println("$(pad(a)) $(pad(b)) -> $(pad(ap)) $(pad(bp))")
+                produce_from(unpack(W, ap))
+                produce_from(unpack(W, bp))
+            end
+        end
     end
 end
 
@@ -300,16 +320,28 @@ function solutions()
 #                     k -> ptext -> encrypt(k, ptext),
 #                     eq=same_ctext(16, encrypt))
     # tabulate first bit (only) in 8-bit table with 8-bit blocks
-    solve_for_ptext(3, make_solve_lbits(Uint8, 1, Uint8), 
+#    solve_for_ptext(3, make_solve_lbits(Uint8, 1, Uint8), 
+#                    make_keygen(Uint8, 0x1, 0x2, rotate=false),
+#                    k -> p -> encrypt(k, p), 16,
+#                    eq=same_ptext(Uint32, 1),
+#                    encrypt2=k -> (a, b) -> encrypt(k, a, b))
+    # tabulate 9 bits in 16-bit table with 32-bit blocks
+#    solve_for_ptext(3, make_solve_lbits(Uint16, 9, Uint32), 
+#                    make_keygen(Uint32, 0x3, 0x10, rotate=false),
+#                    k -> p -> encrypt(k, p), 32,
+#                    eq=same_ptext(Uint32, 9),
+#                    encrypt2=k -> (a, b) -> encrypt(k, a, b))
+    # adaptive 8 bits, 1 round
+    solve_for_ptext(3, make_search(Uint8), 
                     make_keygen(Uint8, 0x1, 0x2, rotate=false),
                     k -> p -> encrypt(k, p), 16,
-                    eq=same_ptext(Uint32, 1),
+                    eq=same_ptext(),
                     encrypt2=k -> (a, b) -> encrypt(k, a, b))
-    # tabulate 9 bits in 16-bit table with 32-bit blocks
-    solve_for_ptext(3, make_solve_lbits(Uint16, 9, Uint32), 
-                    make_keygen(Uint32, 0x3, 0x10, rotate=false),
+    # adaptive 32 bits, 16 rounds
+    solve_for_ptext(3, make_search(Uint32), 
+                    make_keygen(Uint32, 0x10, 0x10, rotate=false),
                     k -> p -> encrypt(k, p), 32,
-                    eq=same_ptext(Uint32, 9),
+                    eq=same_ptext(),
                     encrypt2=k -> (a, b) -> encrypt(k, a, b))
 end
 

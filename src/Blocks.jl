@@ -1,6 +1,6 @@
 
 module Blocks
-export pack, unpack, group, pad
+export pack, unpack, group, pad, produce_from
 
 function pack{W<:Unsigned}(::Type{W}, bytes)
     block::W = 0x0
@@ -52,6 +52,12 @@ function pad{W<:Unsigned}(n::W)
         s = "0$s"
     end
     s
+end
+
+function produce_from(seq)
+    for s in seq
+        produce(s)
+    end
 end
 
 

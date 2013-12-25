@@ -54,4 +54,7 @@ function same_ptext{W<:Unsigned}(::Type{W}, nbits)
     end
 end
 
+same_ptext(W) = same_ptext(W, sizeof(W))
+same_ptext() = same_ptext(Uint8)
+
 end
