@@ -1,19 +1,32 @@
 
 module Solve
-export from_known_ptext, from_known_state, rands, same_ctext
+export solve_for_key, solve_for_ptext, rands, same_ctext, same_ptext
 
 using Tasks
 
-function from_known_ptext(n, solve, keygen, encrypt; eq= ==)
-    println(solve)
+function solve_for_key(n, solve, keygen, encrypt; eq= ==)
     for i = 1:n
         k1 = keygen()
         println("target $k1")
-        tic()
         k2 = solve(encrypt(k1))
-        t = toq()
         ok = eq(k1, k2)
-        @printf("%d: %s %s\n", i, k1, ok)
+        println("$i: $k2 $ok")
+        @assert ok
+    end
+end
+
+function solve_for_ptext(n, solve, keygen, encrypt, len; 
+                         eq= ==, encrypt2=nothing)
+    for i = 1:n
+        k = keygen()
+        e1 = encrypt(k)
+        e2 = encrypt2 == nothing ? e1 : encrypt2(k)
+        p1 = collect(Uint8, take(len, rands(Uint8)))
+        println("target $(bytes2hex(p1))")
+        c = e(p1)
+        p2 = solve(c, e2)
+        ok = eq(p1, p2)
+        println("$i: $(bytes2hex(p2)) $ok")
         @assert ok
     end
 end
@@ -26,6 +39,17 @@ function same_ctext(n, encrypt)
         c1 = collect(Uint8, encrypt(k1, p))
         c2 = collect(Uint8, encrypt(k2, p))
         c1 == c2
+    end
+end
+
+function same_ptext(nbits)
+    function eq(p1, p2)
+        m = 2^nbits - 1
+        ok = true
+        for (a, b) in zip(p1, p2)
+            ok = ok && a & m == b & m
+        end
+        ok
     end
 end
 
