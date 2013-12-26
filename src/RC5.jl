@@ -1,8 +1,8 @@
 module RC5
 using Blocks, Solve, Tasks, Debug
 
-# this includes a definition of RC5 (with and without rotation) and an
-# implementation of the following attacks:
+# this includes a definition of RC5 (with and without rotation, but no
+# decryption, currently) and an implementation of the following attacks:
 #
 # - derivation of internal state using adaptive plaintext for 0 rounds
 #   and no rotation
@@ -14,6 +14,12 @@ using Blocks, Solve, Tasks, Debug
 
 
 # ---- RC5 cipher support (state, encryption, etc)
+
+# the key is expanded to give a (immutable) State instance, which is used 
+# for encryption.  note that everything is parameterised by half-block 
+# size, as well as key (length), state size, and rotation (disabling
+# rotation is not part of the official RC5 definition, but is used here
+# to reduce strength).
 
 const P8 = 0xb7
 const Q8 = 0x9e
@@ -32,16 +38,16 @@ immutable State{W<:Unsigned}
 end
 
 State(w::Type{Uint8}, r::Uint8, k::Array{Uint8}; rotate=true) = 
-State{w}(r, k, expand(w, r, k, P8, Q8), rotate)
+State{w}(r, k, expand_key(w, r, k, P8, Q8), rotate)
 
 State(w::Type{Uint16}, r::Uint8, k::Array{Uint8}; rotate=true) = 
-State{w}(r, k, expand(w, r, k, P16, Q16), rotate)
+State{w}(r, k, expand_key(w, r, k, P16, Q16), rotate)
 
 State(w::Type{Uint32}, r::Uint8, k::Array{Uint8}; rotate=true) = 
-State{w}(r, k, expand(w, r, k, P32, Q32), rotate)
+State{w}(r, k, expand_key(w, r, k, P32, Q32), rotate)
 
 State(w::Type{Uint64}, r::Uint8, k::Array{Uint8}; rotate=true) = 
-State{w}(r, k, expand(w, r, k, P64, Q64), rotate)
+State{w}(r, k, expand_key(w, r, k, P64, Q64), rotate)
 
 sprintf_state{W<:Unsigned}(s::State{W}) = join(map(pad, s.s), "")
 
@@ -65,7 +71,7 @@ end
 rotatel{W<:Unsigned}(::Type{W}, x::Integer, n::Integer) = 
 rotatel(convert(W, x), n)
 
-function expand{W<:Unsigned}(w::Type{W}, r::Uint8, k::Array{Uint8}, p::W, q::W)
+function expand_key{W<:Unsigned}(w::Type{W}, r::Uint8, k::Array{Uint8}, p::W, q::W)
     u = sizeof(w)
     b = length(k)
     c::Uint8 = ceil(b / u)
@@ -93,6 +99,7 @@ function expand{W<:Unsigned}(w::Type{W}, r::Uint8, k::Array{Uint8}, p::W, q::W)
 end
 
 function encrypt{W<:Unsigned}(s::State{W}, a::W, b::W)
+    # encrypt two half-blocks
     a::W = a + s.s[1]
     b::W = b + s.s[2]
     for i = 1:s.r
@@ -111,6 +118,7 @@ function encrypt{W<:Unsigned}(s::State{W}, a::W, b::W)
 end
 
 function encrypt{W<:Unsigned}(s::State{W}, plain)
+    # encrypt a stream of bytes
     e = Task() do
         for ab in group(2, pack(W, plain))
             c, d = encrypt(s, ab...)
@@ -255,12 +263,8 @@ function make_solve_lbits_noro{W<:Unsigned, T<:Unsigned}(::Type{T}, nbits, ::Typ
                 ap::W, bp::W = a & m, b & m
                 c::W, d::W = table[ap+1, bp+1, 1:2]
 #                println("$(pad(a)) $(pad(b)) -> $(pad(ap)) $(pad(bp)) -> $(pad(c)) $(pad(d))")
-                for x in unpack(W, convert(W, (a & ~m) | c))
-                    produce(x)
-                end
-                for x in unpack(W, convert(W, (b & ~m) | d))
-                    produce(x)
-                end
+                produce_from(unpack(W, convert(W, (a & ~m) | c)))
+                produce_from(unpack(W, convert(W, (b & ~m) | d)))
             end
         end
     end
