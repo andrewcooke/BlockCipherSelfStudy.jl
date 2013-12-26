@@ -1,6 +1,17 @@
 module RC5
 using Blocks, Solve, Tasks, Debug
 
+# this includes a definition of RC5 (with and without rotation) and an
+# implementation of the following attacks:
+#
+# - derivation of internal state using adaptive plaintext for 0 rounds
+#   and no rotation
+# - same for 1 round and no rotation
+# - decryption of least significant bits of half-block, via dictionary,
+#   for any number of rounds with no rotation
+# - decryption using adaptive plaintext for any number of rounds with
+#   no rotation
+
 
 # ---- RC5 cipher support (state, encryption, etc)
 
@@ -211,7 +222,7 @@ end
 
 # ---- lowest bits directly
 
-function make_solve_lbits{W<:Unsigned, T<:Unsigned}(::Type{T}, nbits, ::Type{W})
+function make_solve_lbits_noro{W<:Unsigned, T<:Unsigned}(::Type{T}, nbits, ::Type{W})
 
     # for any number of rounds, or key size, but no rotation, we can
     # tabulate the the first nbits of each half-block and use them as
@@ -273,7 +284,7 @@ end
 
 # ---- adaptive search bit by bit from lsb
 
-function make_search{W<:Unsigned}(::Type{W})
+function make_search_noro{W<:Unsigned}(::Type{W})
 
     # full adaptive decryption.  given two half-blocks we test-encrypt
     # possible combinations for the lsb, then the next bit, etc, until
@@ -311,39 +322,39 @@ make_keygen(w, r, k; rotate=true) =
 
 function solutions()
     # no rotation and zero rounds
-#    solve_for_key(3, make_solve_r0(Uint32, 0x2), 
-#                     make_keygen(Uint32, 0x0, 0x2),
-#                     k -> ptext -> encrypt(k, ptext), eq=same_state)
+    solve_for_key(3, make_solve_r0(Uint32, 0x2), 
+                     make_keygen(Uint32, 0x0, 0x2),
+                     k -> ptext -> encrypt(k, ptext), eq=same_state)
     # one rotation, exact back-calculation, 8 bits
-#    solve_for_key(3, make_solve_r1_noro(Uint8), 
-#                     make_keygen(Uint8, 0x1, 0x2, rotate=false),
-#                     k -> ptext -> encrypt(k, ptext), 
-#                     eq=same_ctext(16, encrypt))
+    solve_for_key(3, make_solve_r1_noro(Uint8), 
+                     make_keygen(Uint8, 0x1, 0x2, rotate=false),
+                     k -> ptext -> encrypt(k, ptext), 
+                     eq=same_ctext(16, encrypt))
     # one rotation, exact back-calculation, 32 bits
-#    solve_for_key(3, make_solve_r1_noro(Uint32), 
-#                     make_keygen(Uint32, 0x1, 0x2, rotate=false),
-#                     k -> ptext -> encrypt(k, ptext),
-#                     eq=same_ctext(16, encrypt))
+    solve_for_key(3, make_solve_r1_noro(Uint32), 
+                     make_keygen(Uint32, 0x1, 0x2, rotate=false),
+                     k -> ptext -> encrypt(k, ptext),
+                     eq=same_ctext(16, encrypt))
     # tabulate first bit (only) in 8-bit table with 8-bit blocks
-#    solve_for_ptext(3, make_solve_lbits(Uint8, 1, Uint8), 
-#                    make_keygen(Uint8, 0x1, 0x2, rotate=false),
-#                    k -> p -> encrypt(k, p), 16,
-#                    eq=same_ptext(Uint32, 1),
-#                    encrypt2=k -> (a, b) -> encrypt(k, a, b))
+    solve_for_ptext(3, make_solve_lbits_noro(Uint8, 1, Uint8), 
+                    make_keygen(Uint8, 0x1, 0x2, rotate=false),
+                    k -> p -> encrypt(k, p), 16,
+                    eq=same_ptext(Uint32, 1),
+                    encrypt2=k -> (a, b) -> encrypt(k, a, b))
     # tabulate 9 bits in 16-bit table with 32-bit blocks
-#    solve_for_ptext(3, make_solve_lbits(Uint16, 9, Uint32), 
-#                    make_keygen(Uint32, 0x3, 0x10, rotate=false),
-#                    k -> p -> encrypt(k, p), 32,
-#                    eq=same_ptext(Uint32, 9),
-#                    encrypt2=k -> (a, b) -> encrypt(k, a, b))
+    solve_for_ptext(3, make_solve_lbits_noro(Uint16, 9, Uint32), 
+                    make_keygen(Uint32, 0x3, 0x10, rotate=false),
+                    k -> p -> encrypt(k, p), 32,
+                    eq=same_ptext(Uint32, 9),
+                    encrypt2=k -> (a, b) -> encrypt(k, a, b))
     # adaptive 8 bits, 1 round
-    solve_for_ptext(3, make_search(Uint8), 
+    solve_for_ptext(3, make_search_noro(Uint8), 
                     make_keygen(Uint8, 0x1, 0x2, rotate=false),
                     k -> p -> encrypt(k, p), 16,
                     eq=same_ptext(),
                     encrypt2=k -> (a, b) -> encrypt(k, a, b))
     # adaptive 32 bits, 16 rounds
-    solve_for_ptext(3, make_search(Uint32), 
+    solve_for_ptext(3, make_search_noro(Uint32), 
                     make_keygen(Uint32, 0x10, 0x10, rotate=false),
                     k -> p -> encrypt(k, p), 32,
                     eq=same_ptext(),
