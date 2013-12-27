@@ -171,14 +171,16 @@ function make_solve_r1_noro{W<:Unsigned}(::Type{W})
             while true
                 a0::W = rand(W)
                 a1::W = a0 - m  # minus here
-                ap0, _, ap1, _ = pack(W, e(unpack(W[a0, 0x0, a1, 0x0])))
+                ap0, _ = e(a0, convert(W, 0x0))
+                ap1, _ = e(a1, convert(W, 0x0))
                 d = convert(Int64, ap0) - convert(Int64, ap1)
                 if d == m  # subtract and find, so bit zero
  #                   println("bit $b of s2 0: $(pad(k))")
                     break
                 end
                 a1 = a0 + m  # plus here
-                ap0, _, ap1, _ = pack(W, e(unpack(W[a0, 0x0, a1, 0x0])))
+                ap0, _ = e(a0, convert(W, 0x0))
+                ap1, _ = e(a1, convert(W, 0x0))
                 d = convert(Int64, ap0) - convert(Int64, ap1)
                 if d == m  # add and find, so bit one
                     k = k+m
@@ -193,20 +195,21 @@ function make_solve_r1_noro{W<:Unsigned}(::Type{W})
             # a0'-a1' = ((a0+s[1]) $ (b0+s[2])) - ((a1+s[1]) $ (b1+s[2]))
             #         = (s[1] - (s[1] $ 0xf..f))
             #         = s[1] - (-s[1]-1)
-            ap0, _, ap1, _ = pack(W, e(unpack(W[0x0, -s2, 0x0, -1-s2])))
+            ap0, _ = e(convert(W, 0x0), convert(W, -s2))
+            ap1, _ = e(convert(W, 0x0), convert(W, -1-s2))
 #            println("a0' $(pad(ap0))  a1' $(pad(ap1))")
             s1l7::W = convert(W, ap0 - ap1 - 1) >> 1  # don't know top bit
             for s1::W in (s1l7, s1l7+0x80)
                 s3::W = ap0 - s1
 		u::W, v::W = rand(W), rand(W)
-                up::W, vp::W = pack(W, e(unpack(W[u, v])))
+                up::W, vp::W = e(u, v)
 		s4::W = convert(W, vp - (convert(W, v + s2) $ up))
                 println("if s2=$(pad(s2)) and s1=$(pad(s1)) then s3=$(pad(s3)) and s4=$(pad(s4))")
                 # check if the current s1,2,3 are ok
                 i, ok = 0, true
                 while ok && i < 10
 		    u, v = rand(W), rand(W)
-                    up, vp = pack(W, e(unpack(W[u, v])))
+                    up, vp = e(u, v)
                     upp::W, vpp::W = r1_noro(u, v, s1, s2, s3, s4)
 #		    println("$(pad(up)) $(pad(upp)) $(pad(vp)) $(pad(vpp))")
                     ok = up == upp && vp == vpp
@@ -326,43 +329,43 @@ make_keygen(w, r, k; rotate=true) =
 
 function solutions()
     # no rotation and zero rounds
-    solve_for_key(3, make_solve_r0(Uint32, 0x2), 
+    key_from_encrypt(3, make_solve_r0(Uint32, 0x2), 
                      make_keygen(Uint32, 0x0, 0x2),
                      k -> ptext -> encrypt(k, ptext), eq=same_state)
     # one rotation, exact back-calculation, 8 bits
-    solve_for_key(3, make_solve_r1_noro(Uint8), 
+    key_from_encrypt(3, make_solve_r1_noro(Uint8), 
                      make_keygen(Uint8, 0x1, 0x2, rotate=false),
-                     k -> ptext -> encrypt(k, ptext), 
+                     k -> (a, b) -> encrypt(k, a, b), 
                      eq=same_ctext(16, encrypt))
     # one rotation, exact back-calculation, 32 bits
-    solve_for_key(3, make_solve_r1_noro(Uint32), 
+    key_from_encrypt(3, make_solve_r1_noro(Uint32), 
                      make_keygen(Uint32, 0x1, 0x2, rotate=false),
-                     k -> ptext -> encrypt(k, ptext),
+                     k -> (a, b) -> encrypt(k, a, b),
                      eq=same_ctext(16, encrypt))
     # tabulate first bit (only) in 8-bit table with 8-bit blocks
-    solve_for_ptext(3, make_solve_lbits_noro(Uint8, 1, Uint8), 
-                    make_keygen(Uint8, 0x1, 0x2, rotate=false),
-                    k -> p -> encrypt(k, p), 16,
-                    eq=same_ptext(Uint32, 1),
-                    encrypt2=k -> (a, b) -> encrypt(k, a, b))
+    ptext_from_encrypt(3, make_solve_lbits_noro(Uint8, 1, Uint8), 
+                       make_keygen(Uint8, 0x1, 0x2, rotate=false),
+                       k -> p -> encrypt(k, p), 16,
+                       eq=same_ptext(Uint32, 1),
+                       encrypt2=k -> (a, b) -> encrypt(k, a, b))
     # tabulate 9 bits in 16-bit table with 32-bit blocks
-    solve_for_ptext(3, make_solve_lbits_noro(Uint16, 9, Uint32), 
-                    make_keygen(Uint32, 0x3, 0x10, rotate=false),
-                    k -> p -> encrypt(k, p), 32,
-                    eq=same_ptext(Uint32, 9),
-                    encrypt2=k -> (a, b) -> encrypt(k, a, b))
+    ptext_from_encrypt(3, make_solve_lbits_noro(Uint16, 9, Uint32), 
+                       make_keygen(Uint32, 0x3, 0x10, rotate=false),
+                       k -> p -> encrypt(k, p), 32,
+                       eq=same_ptext(Uint32, 9),
+                       encrypt2=k -> (a, b) -> encrypt(k, a, b))
     # adaptive 8 bits, 1 round
-    solve_for_ptext(3, make_search_noro(Uint8), 
-                    make_keygen(Uint8, 0x1, 0x2, rotate=false),
-                    k -> p -> encrypt(k, p), 16,
-                    eq=same_ptext(),
-                    encrypt2=k -> (a, b) -> encrypt(k, a, b))
+    ptext_from_encrypt(3, make_search_noro(Uint8), 
+                       make_keygen(Uint8, 0x1, 0x2, rotate=false),
+                       k -> p -> encrypt(k, p), 16,
+                       eq=same_ptext(),
+                       encrypt2=k -> (a, b) -> encrypt(k, a, b))
     # adaptive 32 bits, 16 rounds
-    solve_for_ptext(3, make_search_noro(Uint32), 
-                    make_keygen(Uint32, 0x10, 0x10, rotate=false),
-                    k -> p -> encrypt(k, p), 32,
-                    eq=same_ptext(),
-                    encrypt2=k -> (a, b) -> encrypt(k, a, b))
+    ptext_from_encrypt(3, make_search_noro(Uint32), 
+                       make_keygen(Uint32, 0x10, 0x10, rotate=false),
+                       k -> p -> encrypt(k, p), 32,
+                       eq=same_ptext(),
+                       encrypt2=k -> (a, b) -> encrypt(k, a, b))
 end
 
 

@@ -1,10 +1,10 @@
 
 module Solve
-export solve_for_key, solve_for_ptext, rands, same_ctext, same_ptext
+export key_from_encrypt, ptext_from_encrypt, rands, same_ctext, same_ptext
 
 using Tasks, Blocks
 
-function solve_for_key(n, solve, keygen, encrypt; eq= ==)
+function key_from_encrypt(n, solve, keygen, encrypt; eq= ==)
     for i = 1:n
         k1 = keygen()
         println("target $k1")
@@ -15,8 +15,8 @@ function solve_for_key(n, solve, keygen, encrypt; eq= ==)
     end
 end
 
-function solve_for_ptext(n, solve, keygen, encrypt, len; 
-                         eq= ==, encrypt2=nothing)
+function ptext_from_encrypt(n, solve, keygen, encrypt, len; 
+                            eq= ==, encrypt2=nothing)
     for i = 1:n
         k = keygen()
         e1 = encrypt(k)
