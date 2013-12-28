@@ -332,20 +332,23 @@ end
 
 type Context
     total::Float64
+    lowest::Float64
     limit::Int
     ctext::Array{Uint8,1}
     ptext::Array{Uint8,1}
 end
 
 function GA.prepare!{S<:State}(p::Population{Context, S, Float64})
-    p.context.total = sum(map(pair -> pair[1], p.sorted))
+    scores = collect(Float64, map(pair -> pair[1], p.sorted))
+    p.context.total = sum(scores)
+    p.context.lowest = minimum(scores)
     println("before: $(p.sorted[1][1]) / $(p.context.total)")
 end
 
 function GA.select{S<:State}(p::Population{Context, S, Float64})
-    r = rand() * p.context.total
+    r = rand() * (p.context.total - p.size * p.context.lowest)
     for (s,i) in p.sorted
-        r = r - s
+        r = r - (s - p.context.lowest)
         if r <= 0
             return i
         end
@@ -362,16 +365,18 @@ function GA.breed{W<:Unsigned}(c::Context, s1::State{W}, s2::State{W})
 end
 
 function GA.mutate{W<:Unsigned}(c::Context, s::State{W})
-    for _ in 1:rand(0:100*length(s.s))
-        i = rand(1:length(s.s))
-        bit = 1 << rand(0:8*sizeof(W)-1)
-        s.s[i] = s.s[i] $ bit
+    for x in 1:2
+        mask = 1 << (rand(1:8*sizeof(W)) - 1)
+        for y in 1:length(s.s)
+            i = rand(1:length(s.s))
+            s.s[i] = s.s[i] $ mask
+        end
     end
     s
 end
 
 function GA.complete{S<:State}(age, p::Population{Context, S, Float64})
-    println("after: $(p.sorted[1][1]) at $(p.generation)")
+    println("after: $(p.sorted[1][1]), $(p.sorted[end][1]) at $(p.generation)")
     return p.generation >= p.context.limit
 end
 
@@ -379,9 +384,9 @@ function count_up(pair)
     w, s, bit, bits = 1.0, 0.0, 1, pair[1] $ pair[2]
     for _ in 1:8
         if bits & bit == 0
-            w = w / 2.0
-        else
             s = s + w
+        else
+            w = w / 2.0
         end
         bit = bit << 1
     end
@@ -399,7 +404,7 @@ function make_solve_ga{W<:Unsigned}(::Type{W}, r, k, len, limit, size, nchild)
         ctext = collect(Uint8, e(ptext))
         s = [State(W, r, collect(Uint8, take(k, rands(Uint8))), rotate=false)
              for _ in 1:size]
-        p = Population(Context(0, limit, ctext, ptext), s, nchild, Float64)
+        p = Population(Context(0, 0, limit, ctext, ptext), s, nchild, Float64)
         age, p = evolve(p)
         p.sorted[1][2]
     end
@@ -413,7 +418,7 @@ make_keygen(w, r, k; rotate=true) =
 
 function solutions()
     # GA, 8 bits, no rotation, 1 round
-    key_from_encrypt(3, make_solve_ga(Uint8, 0x1, 0x8, 256, 100000, 1000, 10),
+    key_from_encrypt(3, make_solve_ga(Uint8, 0x1, 0x8, 256, 100000, 100, 10),
                      make_keygen(Uint8, 0x1, 0x8),
                      k -> ptext -> encrypt(k, ptext), eq=same_state)
     return
