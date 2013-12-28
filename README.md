@@ -29,10 +29,10 @@ is very easy.  A plaintext of 0 gives you the state.
 
 An adaptive, chosen plaintext
 [attack](https://github.com/andrewcooke/BlockCipherSelfStudy.jl/blob/master/src/RC5.jl#L164)
-that reverses the maths, step-by-step.  Getting the value of "the xor state"
-was tricky - I eventually realised that comparing the results from encypting
-two values, differing only in one bit, would (often) given the necessary
-information.
+that reverses the maths, step-by-step, to retrieve the internal state.
+Getting the value of "the xor state" was tricky - I eventually realised that
+comparing the results from encypting two values, differing only in one bit,
+would (often) given the necessary information.
 
 ### Any Rounds, No Rotation, Lowest Bits
 
@@ -45,8 +45,8 @@ block.
 
 ### Any Rounds, No Rotation
 
-Extending the above, an adaptive plaintext attack (requiring about two blocks
-per bit) can
+Extending the above, an adaptive attack (requiring about two blocks per bit)
+can
 [search](https://github.com/andrewcooke/BlockCipherSelfStudy.jl/blob/master/src/RC5.jl#L300)
 for the plaintext, bit by bit.  This works because the only mixing between
 bits (without rotation) is via carry in additions.  So there are only 4
