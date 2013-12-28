@@ -51,7 +51,7 @@ per bit) can
 for the plaintext, bit by bit.  This works because the only mixing between
 bits (without rotation) is via carry in additions.  So there are only 4
 combinations of lowest bit (for the two half-blocks) that affect the lowest
-bit.  Then four mdoe for the next, and so on.
+bit.  Then four more for the next, and so on.
 
 <!--
 [![Build Status](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl.png)](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl)
