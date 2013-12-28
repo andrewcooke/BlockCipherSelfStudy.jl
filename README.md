@@ -19,13 +19,13 @@ It is very configurable - the size of half-blocks, the number of rounds, and
 the key size can all be varied.  Here, in addition, to reduce strength, we
 modify how / when rotations are applied.
 
-### 0 Rounds, No Rotation
+### State - 0 Rounds, No Rotation
 
 Well,
 [this](https://github.com/andrewcooke/BlockCipherSelfStudy.jl/blob/master/src/RC5.jl#L142)
 is very easy.  A plaintext of 0 gives you the state.
 
-### 1 Round, No Rotation
+### State - 1 Round, No Rotation
 
 An adaptive, chosen plaintext
 [attack](https://github.com/andrewcooke/BlockCipherSelfStudy.jl/blob/master/src/RC5.jl#L164)
@@ -34,7 +34,7 @@ Getting the value of "the xor state" was tricky - I eventually realised that
 comparing the results from encypting two values, differing only in one bit,
 would (often) given the necessary information.
 
-### Any Rounds, No Rotation, Lowest Bits
+### Plaintext - Any Rounds, No Rotation, Lowest Bits
 
 Something of an intermediate step between the attacks above and below.  The
 lowest bits in each half-block can be
@@ -43,7 +43,7 @@ independently of the rest of the bits (taking the two halves as a single
 pair).  A single byte is very easy, giving rapid decryption of two bytes per
 block.
 
-### Any Rounds, No Rotation
+### Plaintext - Any Rounds, No Rotation
 
 Extending the above, an adaptive attack (requiring about two blocks per bit)
 can
