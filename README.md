@@ -15,7 +15,7 @@ RC5 is an elegant block cipher that uses plaintext-dependent rotations
 (although the amount of rotation cannot be determined from the plaintext
 alone).
 
-It is very configurable - the size of half blocks, the number of rounds, and
+It is very configurable - the size of half-blocks, the number of rounds, and
 the key size can all be varied.  Here, in addition, to reduce strength, we
 modify how / when rotations are applied.
 
