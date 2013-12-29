@@ -36,8 +36,7 @@ would (often) given the necessary information.
 
 ### Plaintext - Any Rounds, No Rotation, Lowest Bits
 
-Something of an intermediate step between the attacks above and below.  The
-lowest bits in each half-block can be
+The lowest bits in each half-block can be
 [tabulated](https://github.com/andrewcooke/BlockCipherSelfStudy.jl/blob/master/src/RC5.jl#L242)
 independently of the rest of the bits (taking the two halves as a single
 pair).  A single byte is very easy, giving rapid decryption of two bytes per

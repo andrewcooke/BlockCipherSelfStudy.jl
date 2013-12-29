@@ -3,6 +3,14 @@ module GA
 using Debug
 export Population, evolve
 
+# a simple GA framework.  callers should implement the methods below,
+# instantiate a Population instance, and call evolve.  the "context"
+# field in Population allows the caller to store additional data / state
+# used in calculations.
+
+# individual evaluation is done in parallel (everything else is a single
+# thread).
+
 # prepare!(population) -> nothing
 # score(context, individual) -> score
 # select(population) -> individual
@@ -21,12 +29,12 @@ function score_and_pair(context)
     individual -> (score(context, individual), individual)
 end
 
-type Population{C,I,S}
-    context::C
+type Population{Context, Individual, Score}
+    context::Context
     generation::Int
     size::Int
     n_children::Int
-    sorted::Array{(S,I),1}
+    sorted::Vector{(Score, Individual)}
 end
 
 function Population{C,I,S}(context::C, popn::Array{I,1}, n_children, ::Type{S})
