@@ -61,10 +61,6 @@ function Base.show{W<:Unsigned}(io::IO, s::State{W})
                        sprintf_state(s)))
 end
 
-function Base.isless{W<:Unsigned}(s1::State{W}, s2::State{W})
-    false
-end
-
 function same_state{W<:Unsigned}(s1::State{W}, s2::State{W})
     s1.r == s2.r && s1.s == s2.s && s1.rotate == s2.rotate
 end
@@ -330,24 +326,31 @@ end
 
 # ---- genetic algorithm to derive state
 
+typealias Score (Float64, Vector{Int})
+
+Base.isless{W<:Unsigned}(s1::State{W}, s2::State{W}) = false
+Base.isless(a1::Vector{Int}, a2::Vector{Int}) = 
+length(a1) == length(a2) && length(a1) > 0 && 
+(a1[1] < a2[1] || (a1[1] == a2[1] && length(a1) > 1 && a1[2:] < a2[2:]))
+
 type Context
     total::Float64
     lowest::Float64
     limit::Int
-    ctext::Array{Uint8,1}
-    ptext::Array{Uint8,1}
+    ctext::Vector{Uint8}
+    ptext::Vector{Uint8}
 end
 
-function GA.prepare!{S<:State}(p::Population{Context, S, Float64})
-    scores = collect(Float64, map(pair -> pair[1], p.sorted))
+function GA.prepare!{S<:State}(p::Population{Context, S, Score})
+    scores = collect(Float64, map(pair -> pair[1][1], p.sorted))
     p.context.total = sum(scores)
     p.context.lowest = minimum(scores)
     println("before: $(p.sorted[1][1]) / $(p.context.total)")
 end
 
-function GA.select{S<:State}(p::Population{Context, S, Float64})
+function GA.select{S<:State}(p::Population{Context, S, Score})
     r = rand() * (p.context.total - p.size * p.context.lowest)
-    for (s,i) in p.sorted
+    for ((s, g), i) in p.sorted
         r = r - (s - p.context.lowest)
         if r <= 0
             return i
@@ -360,14 +363,15 @@ function GA.breed{W<:Unsigned}(c::Context, s1::State{W}, s2::State{W})
     b1, b2 = rand(0:8*sizeof(W)-1, 2)
     b1, b2 = min(b1, b2), max(b1, b2)
     mask::W = 2^b2-1 - (2^b1-1)
-    State(s1.r, s1.k, W[(s[1]&mask)|(s[2]&~mask) for s in zip(s1.s, s2.s)],
+    State(s1.r, Uint8[], 
+          W[(s[1]&mask)|(s[2]&~mask) for s in zip(s1.s, s2.s)],
           rotate=false)
 end
 
 function GA.mutate{W<:Unsigned}(c::Context, s::State{W})
-    for x in 1:2
-        mask = 1 << (rand(1:8*sizeof(W)) - 1)
-        for y in 1:length(s.s)
+    for x in 1:rand(1:2)
+        mask::W = 1 << (rand(1:8*sizeof(W)) - 1)
+        for y in 1:rand(1:3)
             i = rand(1:length(s.s))
             s.s[i] = s.s[i] $ mask
         end
@@ -375,27 +379,27 @@ function GA.mutate{W<:Unsigned}(c::Context, s::State{W})
     s
 end
 
-function GA.complete{S<:State}(age, p::Population{Context, S, Float64})
-    println("after: $(p.sorted[1][1]), $(p.sorted[end][1]) at $(p.generation)")
+function GA.complete{S<:State}(age, p::Population{Context, S, Score})
+    println("after: $(p.sorted[1][1]), $(p.sorted[end][1][1]) at $(p.generation)")
     return p.generation >= p.context.limit
 end
 
-function count_up(pair)
-    w, s, bit, bits = 1.0, 0.0, 1, pair[1] $ pair[2]
-    for _ in 1:8
-        if bits & bit == 0
-            s = s + w
-        else
-            w = w / 2.0
+function GA.score{W<:Unsigned}(c::Context, s::State{W})
+    ctext = collect(Uint8, encrypt(s, c.ptext))
+    s, g = 0.0, zeros(Int, 8*sizeof(W))
+    for (c1, c2) in zip(pack(W, ctext), pack(W, c.ctext))
+        bits, w, bit = c1 $ c2, 1.0, 1
+        for i in 1:8*sizeof(W)
+            if bits & bit == 0
+                s = s + w
+                g[i] = g[i] + 1
+            else
+                w = w / 100.0
+            end
+            bit = bit << 1
         end
-        bit = bit << 1
     end
-    s
-end
-
-function GA.score{S<:State}(c::Context, s::S)
-    ctext = encrypt(s, c.ptext)
-    sum(map(count_up, zip(ctext, c.ctext)))
+    (s, g)
 end
 
 function make_solve_ga{W<:Unsigned}(::Type{W}, r, k, len, limit, size, nchild)
@@ -404,7 +408,7 @@ function make_solve_ga{W<:Unsigned}(::Type{W}, r, k, len, limit, size, nchild)
         ctext = collect(Uint8, e(ptext))
         s = [State(W, r, collect(Uint8, take(k, rands(Uint8))), rotate=false)
              for _ in 1:size]
-        p = Population(Context(0, 0, limit, ctext, ptext), s, nchild, Float64)
+        p = Population(Context(0, 0, limit, ctext, ptext), s, nchild, Score)
         age, p = evolve(p)
         p.sorted[1][2]
     end
@@ -418,8 +422,8 @@ make_keygen(w, r, k; rotate=true) =
 
 function solutions()
     # GA, 8 bits, no rotation, 1 round
-    key_from_encrypt(3, make_solve_ga(Uint8, 0x1, 0x8, 256, 100000, 100, 10),
-                     make_keygen(Uint8, 0x1, 0x8),
+    key_from_encrypt(3, make_solve_ga(Uint8, 0x1, 0x1, 256, 100000, 100, 100),
+                     make_keygen(Uint8, 0x1, 0x1),
                      k -> ptext -> encrypt(k, ptext), eq=same_state)
     return
     # no rotation and zero rounds
