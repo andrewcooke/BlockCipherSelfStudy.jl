@@ -53,12 +53,15 @@ bits (without rotation) is via carry in additions.  So there are only 4
 combinations of lowest bit (for the two half-blocks) that affect the lowest
 bit.  Then four more for the next, and so on.
 
-### State - ? Rounds, No Rotation
+### State - 8 bits 2 Rounds / 32 bits 1 Round, No Rotation
 
-Continuing to work up from the lsb, a [GA
+A [GA
 search](https://github.com/andrewcooke/BlockCipherSelfStudy.jl/blob/master/src/RC5.jl#L327)
-that finds the state.  This is not very efficient so I am experimenting to
-find the practical limits.
+that finds the state.  This weights scoring of successfully translated
+half-blocks to built the state from the lsb and targets mutations at the least
+significant incomplete bit.  So, for example, if all half-blocks have the
+first 3 bits of a plaintext encrypted correctly, scoring and mutation target
+the fourth bit, with some mutation at lower bits for carry.
 
 <!--
 [![Build Status](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl.png)](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl)

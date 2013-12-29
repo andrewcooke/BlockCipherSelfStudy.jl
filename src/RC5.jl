@@ -377,6 +377,7 @@ end
 function GA.mutate{W<:Unsigned}(c::Context, s::State{W})
     for x in 1:rand(1:2)
         lo = rand(1:max(1, c.complete))
+#        lo = 1
         hi = min(c.complete+1, 8*sizeof(W))
         mask::W = 1 << (rand(lo:hi) - 1)
         for y in 1:rand(1:3)
@@ -390,7 +391,7 @@ end
 function GA.complete{W<:Unsigned}(age, p::Population{Context, State{W}, Score})
     println("after: $(p.sorted[1][1]), $(p.sorted[end][1][1]) at $(p.generation)")
     return p.generation >= p.context.limit || 
-    p.sorted[1][1][2] == length(p.context.ptext)*ones(Int, 8*sizeof(W))
+    p.sorted[1][1][2] == length(p.context.ptext/sizeof(W))*ones(Int, 8*sizeof(W))
 end
 
 function GA.score{W<:Unsigned}(c::Context, s::State{W})
@@ -403,13 +404,32 @@ function GA.score{W<:Unsigned}(c::Context, s::State{W})
                 s = s + w
                 g[i] = g[i] + 1
             else
-                w = w / 2.0
+                w = w / 10.0
             end
             bit = bit << 1
         end
     end
     (s, g)
 end
+
+#function GA.score{W<:Unsigned}(c::Context, s::State{W})
+#    ctext = collect(Uint8, encrypt(s, c.ptext))
+#    s, g = 0.0, zeros(Int, 8*sizeof(W))
+#    for (c1, c2) in zip(pack(W, ctext), pack(W, c.ctext))
+#        bits, w, bit = c1 $ c2, 1.0, 1
+#        for i in 1:8*sizeof(W)
+#            if bits & bit == 0
+#                s = s + w
+#                g[i] = g[i] + 1
+#            end
+#            if i > c.complete
+#                w = w / 2.0
+#            end
+#            bit = bit << 1
+#        end
+#    end
+#    (s, g)
+#end
 
 function make_solve_ga{W<:Unsigned}(::Type{W}, r, k, len, limit, size, nchild)
     @assert len % sizeof(W) == 0
@@ -433,12 +453,6 @@ fake_keygen(w, r, k; rotate=true) =
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
-    # GA, 32 bits, no rotation, 8 rounds
-    key_from_encrypt(3, make_solve_ga(Uint32, 0x8, 0x10, 1024, 100000, 1000, 100),
-                     make_keygen(Uint32, 0x8, 0x10, rotate=false),
-                     k -> ptext -> encrypt(k, ptext), 
-                     eq=same_ctext(256, encrypt))
-    return
     # no rotation and zero rounds
     key_from_encrypt(3, make_solve_r0(Uint32, 0x2), 
                      make_keygen(Uint32, 0x0, 0x2, rotate=false),
@@ -477,9 +491,14 @@ function solutions()
                        k -> p -> encrypt(k, p), 32,
                        eq=same_ptext(),
                        encrypt2=k -> (a, b) -> encrypt(k, a, b))
-    # GA, 8 bits, no rotation, 1 round
-    key_from_encrypt(3, make_solve_ga(Uint8, 0x1, 0x1, 256, 1000, 100, 10),
-                     make_keygen(Uint8, 0x1, 0x1, rotate=false),
+    # GA, 8 bits, no rotation, 2 rounds
+    key_from_encrypt(3, make_solve_ga(Uint8, 0x2, 0x10, 256, 100000, 1000, 100),
+                     make_keygen(Uint8, 0x2, 0x10, rotate=false),
+                     k -> ptext -> encrypt(k, ptext), 
+                     eq=same_ctext(256, encrypt))
+    # GA, 32 bits, no rotation, 1 round
+    key_from_encrypt(3, make_solve_ga(Uint32, 0x1, 0x10, 256, 100000, 1000, 100),
+                     make_keygen(Uint32, 0x1, 0x10, rotate=false),
                      k -> ptext -> encrypt(k, ptext), 
                      eq=same_ctext(256, encrypt))
 end
