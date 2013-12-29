@@ -326,13 +326,17 @@ end
 
 # ---- genetic algorithm to derive state
 
+# the "real" score is the float; the ints are to show how many of each bit
+# we have encoded correctly and to assess completness (and so target mutation)
 typealias Score (Float64, Vector{Int})
 
+# for sorting of (Score, Individual)
 Base.isless{W<:Unsigned}(s1::State{W}, s2::State{W}) = false
 Base.isless(a1::Vector{Int}, a2::Vector{Int}) = 
 length(a1) == length(a2) && length(a1) > 0 && 
 (a1[1] < a2[1] || (a1[1] == a2[1] && length(a1) > 1 && a1[2:] < a2[2:]))
 
+# custom state added to the population
 type Context
     total::Float64        # total score for entire population
     lowest::Float64       # lowest score of entire population
@@ -343,6 +347,8 @@ type Context
 end
 
 function GA.prepare!{W<:Unsigned}(p::Population{Context, State{W}, Score})
+    # called before processing each generation.  store total and min of
+    # scores (used by select to weight) and assess completeness.
     scores = collect(Float64, map(pair -> pair[1][1], p.sorted))
     p.context.total = sum(scores)
     p.context.lowest = minimum(scores)
@@ -355,6 +361,7 @@ function GA.prepare!{W<:Unsigned}(p::Population{Context, State{W}, Score})
 end
 
 function GA.select{S<:State}(p::Population{Context, S, Score})
+    # choose an individual to breed.  weight by score over minimum.
     r = rand() * (p.context.total - p.size * p.context.lowest)
     for ((s, g), i) in p.sorted
         r = r - (s - p.context.lowest)
@@ -366,6 +373,8 @@ function GA.select{S<:State}(p::Population{Context, S, Score})
 end
 
 function GA.breed{W<:Unsigned}(c::Context, s1::State{W}, s2::State{W})
+    # combine two individuals.  a simple banded crossover that selects a 
+    # block of state for a range of bits (followed by mutation below).
     b1, b2 = rand(0:8*sizeof(W)-1, 2)
     b1, b2 = min(b1, b2), max(b1, b2)
     mask::W = 2^b2-1 - (2^b1-1)
@@ -375,12 +384,13 @@ function GA.breed{W<:Unsigned}(c::Context, s1::State{W}, s2::State{W})
 end
 
 function GA.mutate{W<:Unsigned}(c::Context, s::State{W})
+    # target the "next" bit after complete, with some lower bits for carry.
     for x in 1:rand(1:2)
         lo = rand(1:max(1, c.complete))
-#        lo = 1
         hi = min(c.complete+1, 8*sizeof(W))
         mask::W = 1 << (rand(lo:hi) - 1)
         for y in 1:rand(1:3)
+            # multiple hits on same bit - 2 will often perserve parity
             i = rand(1:length(s.s))
             s.s[i] = s.s[i] $ mask
         end
@@ -395,41 +405,24 @@ function GA.complete{W<:Unsigned}(age, p::Population{Context, State{W}, Score})
 end
 
 function GA.score{W<:Unsigned}(c::Context, s::State{W})
+    # contiguous correct bits from lsb receive maximum score; weighting
+    # decreases for correct bits after first error.
     ctext = collect(Uint8, encrypt(s, c.ptext))
-    s, g = 0.0, zeros(Int, 8*sizeof(W))
+    score, good = 0.0, zeros(Int, 8*sizeof(W))
     for (c1, c2) in zip(pack(W, ctext), pack(W, c.ctext))
-        bits, w, bit = c1 $ c2, 1.0, 1
+        bits::W, w, bit::W = c1 $ c2, 1.0, 1
         for i in 1:8*sizeof(W)
             if bits & bit == 0
-                s = s + w
-                g[i] = g[i] + 1
+                score = score + w
+                good[i] = good[i] + 1
             else
                 w = w / 10.0
             end
             bit = bit << 1
         end
     end
-    (s, g)
+    (score, good)
 end
-
-#function GA.score{W<:Unsigned}(c::Context, s::State{W})
-#    ctext = collect(Uint8, encrypt(s, c.ptext))
-#    s, g = 0.0, zeros(Int, 8*sizeof(W))
-#    for (c1, c2) in zip(pack(W, ctext), pack(W, c.ctext))
-#        bits, w, bit = c1 $ c2, 1.0, 1
-#        for i in 1:8*sizeof(W)
-#            if bits & bit == 0
-#                s = s + w
-#                g[i] = g[i] + 1
-#            end
-#            if i > c.complete
-#                w = w / 2.0
-#            end
-#            bit = bit << 1
-#        end
-#    end
-#    (s, g)
-#end
 
 function make_solve_ga{W<:Unsigned}(::Type{W}, r, k, len, limit, size, nchild)
     @assert len % sizeof(W) == 0
