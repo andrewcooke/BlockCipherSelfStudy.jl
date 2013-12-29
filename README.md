@@ -57,7 +57,7 @@ bit.  Then four more for the next, and so on.
 A [GA
 search](https://github.com/andrewcooke/BlockCipherSelfStudy.jl/blob/master/src/RC5.jl#L327)
 that finds the state.  This weights scoring of successfully translated
-half-blocks to built the state from the lsb and targets mutations at the least
+half-blocks to build the state from the lsb and targets mutations at the least
 significant incomplete bit.  So, for example, if all half-blocks have the
 first 3 bits of a plaintext encrypted correctly, scoring and mutation target
 the fourth bit, with some mutation at lower bits for carry.
