@@ -39,16 +39,16 @@ immutable State{W<:Unsigned}
 end
 
 State(w::Type{Uint8}, r::Uint8, k::Array{Uint8}; rotate=true) = 
-State{w}(r, k, expand_key(w, r, k, P8, Q8), rotate)
+State{w}(r, k, expand_key(r, k, P8, Q8), rotate)
 
 State(w::Type{Uint16}, r::Uint8, k::Array{Uint8}; rotate=true) = 
-State{w}(r, k, expand_key(w, r, k, P16, Q16), rotate)
+State{w}(r, k, expand_key(r, k, P16, Q16), rotate)
 
 State(w::Type{Uint32}, r::Uint8, k::Array{Uint8}; rotate=true) = 
-State{w}(r, k, expand_key(w, r, k, P32, Q32), rotate)
+State{w}(r, k, expand_key(r, k, P32, Q32), rotate)
 
 State(w::Type{Uint64}, r::Uint8, k::Array{Uint8}; rotate=true) = 
-State{w}(r, k, expand_key(w, r, k, P64, Q64), rotate)
+State{w}(r, k, expand_key(r, k, P64, Q64), rotate)
 
 # create with a known state (no key)
 State{W<:Unsigned}(r::Uint8, s::Array{W}; rotate=true) = 
@@ -74,16 +74,16 @@ end
 rotatel{W<:Unsigned}(::Type{W}, x::Integer, n::Integer) = 
 rotatel(convert(W, x), n)
 
-function expand_key{W<:Unsigned}(w::Type{W}, r::Uint8, k::Array{Uint8}, p::W, q::W)
-    u = sizeof(w)
+function expand_key{W<:Unsigned}(r::Uint8, k::Array{Uint8}, p::W, q::W)
+    u = sizeof(W)
     b = length(k)
     c::Uint8 = ceil(b / u)
-    l = zeros(w, c)
+    l = zeros(W, c)
     for i = (b-1):-1:0
         l[div(i, u)+1] = (l[div(i, u)+1] << 8) + k[i+1]
     end
     t = 2(r+1)
-    s = zeros(w, t)
+    s = zeros(W, t)
     s[1] = p
     for i = 2:t
         s[i] = s[i-1] + q
@@ -91,9 +91,9 @@ function expand_key{W<:Unsigned}(w::Type{W}, r::Uint8, k::Array{Uint8}, p::W, q:
     i = j = 0
     a::W, b::W = 0x0, 0x0
     for _ = 1:3*max(t, c)
-        s[i+1] = rotatel(w, s[i+1] + (a + b), 0x3)
+        s[i+1] = rotatel(W, s[i+1] + (a + b), 0x3)
         a = s[i+1]
-        l[j+1] = rotatel(w, l[j+1] + (a + b), a + b)
+        l[j+1] = rotatel(W, l[j+1] + (a + b), a + b)
         b = l[j+1]
         i = (i+1) % t
         j = (j+1) % c
@@ -398,7 +398,7 @@ end
 function GA.complete{W<:Unsigned}(age, p::Population{Context, State{W}, Score})
     println("after: $(p.sorted[1][1]), $(p.sorted[end][1][1]) at $(p.generation)")
     return p.generation >= p.context.limit || 
-    p.sorted[1][1][2] == length(p.context.ptext/sizeof(W))*ones(Int, 8*sizeof(W))
+    p.sorted[1][1][2] == length(p.context.ptext)/sizeof(W)*ones(Int, 8*sizeof(W))
 end
 
 function GA.score{W<:Unsigned}(c::Context, s::State{W})
