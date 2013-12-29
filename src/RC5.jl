@@ -50,8 +50,9 @@ State{w}(r, k, expand_key(w, r, k, P32, Q32), rotate)
 State(w::Type{Uint64}, r::Uint8, k::Array{Uint8}; rotate=true) = 
 State{w}(r, k, expand_key(w, r, k, P64, Q64), rotate)
 
-State{W<:Unsigned}(r::Uint8, k::Array{Uint8}, s::Array{W}; rotate=true) = 
-State{W}(r, k, s, rotate)
+# create with a known state (no key)
+State{W<:Unsigned}(r::Uint8, s::Array{W}; rotate=true) = 
+State{W}(r, Uint8[], s, rotate)
 
 sprintf_state{W<:Unsigned}(s::State{W}) = join(map(pad, s.s), "")
 
@@ -219,8 +220,7 @@ function make_solve_r1_noro{W<:Unsigned}(::Type{W})
 		end
 		if ok
                    # pack final state
-                   s = State(W, 0x1, Uint8[0x00], rotate=false)
-                   s.s[1], s.s[2], s.s[3], s.s[4] = s1, s2, s3, s4
+                   s = State(0x1, W[s1, s2, s3, s4], rotate=false)
 		   println("result $s")
                    return s
 		else
@@ -347,11 +347,11 @@ type Context
 end
 
 function GA.prepare!{W<:Unsigned}(p::Population{Context, State{W}, Score})
-    # called before processing each generation.  store total and min of
-    # scores (used by select to weight) and assess completeness.
     scores = collect(Float64, map(pair -> pair[1][1], p.sorted))
-    p.context.total = sum(scores)
+    # used for weighting in select
+    p.context.total = sum(scores) 
     p.context.lowest = minimum(scores)
+    # used for targetting mutation
     p.context.complete = 0
     while p.context.complete < 8*sizeof(W) && 
         p.sorted[1][1][2][p.context.complete+1] == length(p.context.ptext) / sizeof(W)
@@ -361,7 +361,7 @@ function GA.prepare!{W<:Unsigned}(p::Population{Context, State{W}, Score})
 end
 
 function GA.select{S<:State}(p::Population{Context, S, Score})
-    # choose an individual to breed.  weight by score over minimum.
+    # weight by score over minimum.
     r = rand() * (p.context.total - p.size * p.context.lowest)
     for ((s, g), i) in p.sorted
         r = r - (s - p.context.lowest)
@@ -373,19 +373,16 @@ function GA.select{S<:State}(p::Population{Context, S, Score})
 end
 
 function GA.breed{W<:Unsigned}(c::Context, s1::State{W}, s2::State{W})
-    # combine two individuals.  a simple banded crossover that selects a 
-    # block of state for a range of bits (followed by mutation below).
     b1, b2 = rand(0:8*sizeof(W)-1, 2)
     b1, b2 = min(b1, b2), max(b1, b2)
-    mask::W = 2^b2-1 - (2^b1-1)
-    State(s1.r, Uint8[], 
-          W[(s[1]&mask)|(s[2]&~mask) for s in zip(s1.s, s2.s)],
-          rotate=false)
+    # banded crossover - block of state for a range of bits
+    m::W = 2^b2-1 - (2^b1-1)
+    State(s1.r, W[(s[1]&m)|(s[2]&~m) for s in zip(s1.s, s2.s)], rotate=false)
 end
 
 function GA.mutate{W<:Unsigned}(c::Context, s::State{W})
-    # target the "next" bit after complete, with some lower bits for carry.
     for x in 1:rand(1:2)
+        # target the "next" bit after complete, with some lower bits for carry.
         lo = rand(1:max(1, c.complete))
         hi = min(c.complete+1, 8*sizeof(W))
         mask::W = 1 << (rand(lo:hi) - 1)
@@ -405,8 +402,6 @@ function GA.complete{W<:Unsigned}(age, p::Population{Context, State{W}, Score})
 end
 
 function GA.score{W<:Unsigned}(c::Context, s::State{W})
-    # contiguous correct bits from lsb receive maximum score; weighting
-    # decreases for correct bits after first error.
     ctext = collect(Uint8, encrypt(s, c.ptext))
     score, good = 0.0, zeros(Int, 8*sizeof(W))
     for (c1, c2) in zip(pack(W, ctext), pack(W, c.ctext))
@@ -416,6 +411,7 @@ function GA.score{W<:Unsigned}(c::Context, s::State{W})
                 score = score + w
                 good[i] = good[i] + 1
             else
+                # contiguous correct bits from lsb receive maximum score
                 w = w / 10.0
             end
             bit = bit << 1
@@ -448,7 +444,7 @@ fake_keygen(w, r, k; rotate=true) =
 function solutions()
     # no rotation and zero rounds
     key_from_encrypt(3, make_solve_r0(Uint32, 0x2), 
-                     make_keygen(Uint32, 0x0, 0x2, rotate=false),
+                     make_keygen(Uint32, 0x0, 0x2),
                      k -> ptext -> encrypt(k, ptext), eq=same_state)
     # one rotation, exact back-calculation, 8 bits
     key_from_encrypt(3, make_solve_r1_noro(Uint8), 
