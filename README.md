@@ -53,6 +53,13 @@ bits (without rotation) is via carry in additions.  So there are only 4
 combinations of lowest bit (for the two half-blocks) that affect the lowest
 bit.  Then four more for the next, and so on.
 
+### State - ? Rounds, No Rotation
+
+Continuing to work up from the lsb, a [GA
+search](https://github.com/andrewcooke/BlockCipherSelfStudy.jl/blob/master/src/RC5.jl#L327)
+that finds the state.  This is not very efficient so I am experimenting to
+find the practical limits.
+
 <!--
 [![Build Status](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl.png)](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl)
 -->

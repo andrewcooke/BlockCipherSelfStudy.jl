@@ -34,6 +34,7 @@ end
 rands{T<:Integer}(::Type{T}) = repeat(() -> rand(T))
 
 function same_ctext(n, encrypt)
+    # check that both encrypt to the same ctext, for a ptext of length n
     function eq(k1, k2)
         p = collect(Uint8, take(n, rands(Uint8)))
         c1 = collect(Uint8, encrypt(k1, p))
@@ -43,6 +44,8 @@ function same_ctext(n, encrypt)
 end
 
 function same_ptext{W<:Unsigned}(::Type{W}, nbits)
+    # check that the ptext has the same lowest nbits when grouped into 
+    # half blocks
     function eq(p1, p2)
         m::W = 2^nbits - 1
         ok = true
