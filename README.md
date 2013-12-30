@@ -55,12 +55,25 @@ bit.  Then four more for the next, and so on.
 ### State - 8 bits 2 Rounds / 32 bits 1 Round, No Rotation
 
 A [GA
-search](https://github.com/andrewcooke/BlockCipherSelfStudy.jl/blob/master/src/RC5.jl#L327)
+search](https://github.com/andrewcooke/BlockCipherSelfStudy.jl/blob/master/src/RC5.jl#L32)
 that finds the state.  This weights scoring of successfully translated
 half-blocks to build the state from the lsb and targets mutations at the least
 significant incomplete bit.  So, for example, if all half-blocks have the
 first 3 bits of a plaintext encrypted correctly, scoring and mutation target
 the fourth bit, with some mutation at lower bits for carry.
+
+### State - 32 bits 4 Rounds, No Rotation
+
+A
+[DFS](https://github.com/andrewcooke/BlockCipherSelfStudy.jl/blob/master/src/RC5.jl#L438)
+that finds the state.  This searches from least to most significant bit.
+
+Back-tracking for the first 2-4 bits dominates processing time.  Once those
+bits are OK, typically, no further backtracking at that level is necessary and
+moe significant bits are found rapidly and relatively independently.  I do not
+understand why - perhaps it is a bug, but the code gives valid results.
+Adding a "beamwidth" limit to the search, or inverting or reversing the bits
+tried, does not help.
 
 <!--
 [![Build Status](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl.png)](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl)
