@@ -507,9 +507,11 @@ function make_solve_dfs_noro{W<:Unsigned}(::Type{W}, r, len)
 end
 
 function make_solve_beam_noro{W<:Unsigned}(::Type{W}, r, len)
+
     # restrict dfs to limit choices at any level, and then increase
     # limit slowly.  so forces earlier levels to backtrack if a lower
     # level "can find no solution".  slows things down.
+
     function solve(e)
         ptext = collect((W, W), group(2, take(2*len, rands(W))))
         ctext = (W,W)[e(a, b) for (a, b) in ptext]
