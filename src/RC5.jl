@@ -421,7 +421,7 @@ function GA.score{W<:Unsigned}(c::Context, s::State{W})
     (score, good)
 end
 
-function make_solve_ga{W<:Unsigned}(::Type{W}, r, k, len, limit, size, nchild)
+function make_solve_ga_noro{W<:Unsigned}(::Type{W}, r, k, len, limit, size, nchild)
     @assert len % sizeof(W) == 0
     function solve(e)
         ptext = collect(Uint8, take(len, rands(Uint8)))
@@ -449,57 +449,99 @@ function uint_for_bits(n)
             return u
         end
     end
-    @assert false "no uint"
+    error("no uint")
 end
 
-function make_solve_dfs{W<:Unsigned}(::Type{W}, r, len)
+function test_bits{W<:Unsigned}(ptext, ctext, state::State{W}, level)
+    mask::W = convert(W, 1 << level) - 1
+    for ((a, b), (a1, b1)) in zip(ptext, ctext)
+        (a2, b2) = encrypt(state, a, b)
+        if a1 & mask != a2 & mask || b1 & mask != b2 & mask
+            return false
+        end
+    end
+    true
+end
 
+function set_state{W<:Unsigned, U<:Unsigned}(state::State{W}, tree::Vector{U}, width, level)
+    # copy the data from the current tree level into the state
+    # inverting or reversing (msb/lsb) the tree bits doesn't change speed
+    wbit::W, ubit::U = 1 << (level-1), 1
+    for i in 1:width
+        if tree[level] & ubit == 0
+            state.s[i] = state.s[i] & ~wbit
+        else
+            state.s[i] = state.s[i] | wbit
+        end
+        ubit = ubit << 1
+    end
+end
+
+function make_solve_dfs_noro{W<:Unsigned}(::Type{W}, r, len)
     function solve(e)
-
         ptext = collect((W, W), group(2, take(2*len, rands(W))))
         ctext = (W,W)[e(a, b) for (a, b) in ptext]
-
-        function test(state, mask)
-            for ((a, b), (a1, b1)) in zip(ptext, ctext)
-                (a2, b2) = encrypt(state, a, b)
-                if a1 & mask != a2 & mask || b1 & mask != b2 & mask
-                    return false
-                end
-            end
-            true
-        end
-
-        width = 2r + 2
-        depth = 8*sizeof(W)
+        width, depth = 2r+2, 8*sizeof(W)
         U = uint_for_bits(width+1)  # extra bit for overflow
         state = State(r, zeros(W, width), rotate=false)
         tree = zeros(U, depth)
-        level, wbit::W, mask::W, overflow::U = 1, 1, 1, 1 << width
+        level, overflow::U = 1, 1 << width
         while level > 0 && level <= depth
-            # copy current value to state
-            ubit::U, uval::U = 1, tree[level]
-            tree[level] = uval + 1
-            for i in 1:width
-                # mask below just keeps things neat
-                if uval & ubit == 0
-                    state.s[i] = mask & state.s[i] & ~wbit
-                else
-                    state.s[i] = mask & state.s[i] | wbit
-                end
-                ubit = ubit << 1
-            end
-            if test(state, mask)
-                println("$level $(pad(uval)) $(bytes2hex(collect(Uint8, unpack(state.s))))")
-                level, wbit, mask = level + 1, wbit << 1, 1 + mask << 1
+            set_state(state, tree, width, level)
+            tree[level] = tree[level] + 1
+            if test_bits(ptext, ctext, state, level)
+                println("$level/$depth $(pad(tree[level])) $(bytes2hex(collect(Uint8, unpack(state.s))))")
+                level = level + 1
             else
                 # will try next node
             end
             while level > 0 && level <= depth && tree[level] == overflow
-                tree[level] = 0
-                level, wbit, mask = level - 1, wbit >> 1, mask >> 1
+                tree[level], level = 0, level - 1
             end
         end
+        for i in 1:depth
+            println("$i $(pad(tree[i]))")
+        end
         state
+    end
+end
+
+function make_solve_beam_noro{W<:Unsigned}(::Type{W}, r, len)
+    # restrict dfs to limit choices at any level, and then increase
+    # limit slowly.  so forces earlier levels to backtrack if a lower
+    # level "can find no solution".  slows things down.
+    function solve(e)
+        ptext = collect((W, W), group(2, take(2*len, rands(W))))
+        ctext = (W,W)[e(a, b) for (a, b) in ptext]
+        width, depth = 2r+2, 8*sizeof(W)
+        U = uint_for_bits(width+1)  # extra bit for overflow
+        state = State(r, zeros(W, width), rotate=false)
+        overflow::U = 1 << width
+        for limit in [1 << w for w in 1:width]
+            tree, level, beam = zeros(U, depth), 1, zeros(Int, depth)
+            while level > 0
+                set_state(state, tree, width, level)
+                save, tree[level] = tree[level], tree[level] + 1
+                if test_bits(ptext, ctext, state, level)
+                    println("$(beam[level])/$limit $level/$depth $(pad(save)) $(bytes2hex(collect(Uint8, unpack(state.s))))")
+                    beam[level], level = beam[level] + 1, level + 1
+                    if level > depth
+                        for i in 1:depth
+                            println("$i $(pad(tree[i])) $(beam[i])")
+                        end
+                        return state
+                    else
+                        beam[level] = 0
+                    end
+                else
+#                    println("$(beam[level])/$limit $level/$depth $(pad(save))")
+                end
+                while level > 0 && (beam[level] > limit || tree[level] == overflow)
+                    tree[level], level = 0, level - 1
+                end
+            end
+         end
+        error("no solution")
     end
 end
 
@@ -512,12 +554,8 @@ fake_keygen(w, r, k; rotate=true) =
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
-    key_from_encrypt(3, make_solve_dfs(Uint32, 0x8, 32),
-                     make_keygen(Uint32, 0x8, 0x10, rotate=false),
-                     k -> (a, b) -> encrypt(k, a, b), 
-                     eq=same_ctext(16, encrypt))
-    key_from_encrypt(3, make_solve_dfs(Uint8, 0x1, 32),
-                     make_keygen(Uint8, 0x1, 0x10, rotate=false),
+    key_from_encrypt(1, make_solve_dfs_noro(Uint32, 0x6, 64),
+                     make_keygen(Uint32, 0x6, 0x10, rotate=false),
                      k -> (a, b) -> encrypt(k, a, b), 
                      eq=same_ctext(16, encrypt))
     return
@@ -560,15 +598,30 @@ function solutions()
                        eq=same_ptext(),
                        encrypt2=k -> (a, b) -> encrypt(k, a, b))
     # GA, 8 bits, no rotation, 2 rounds
-    key_from_encrypt(3, make_solve_ga(Uint8, 0x2, 0x10, 256, 100000, 1000, 100),
+    key_from_encrypt(3, make_solve_ga_noro(Uint8, 0x2, 0x10, 256, 100000, 1000, 100),
                      make_keygen(Uint8, 0x2, 0x10, rotate=false),
                      k -> ptext -> encrypt(k, ptext), 
                      eq=same_ctext(256, encrypt))
     # GA, 32 bits, no rotation, 1 round
-    key_from_encrypt(3, make_solve_ga(Uint32, 0x1, 0x10, 256, 100000, 1000, 100),
+    key_from_encrypt(3, make_solve_ga_noro(Uint32, 0x1, 0x10, 256, 100000, 1000, 100),
                      make_keygen(Uint32, 0x1, 0x10, rotate=false),
                      k -> ptext -> encrypt(k, ptext), 
                      eq=same_ctext(256, encrypt))
+    # DFS, 8 bits, no rotation, 1 round
+    key_from_encrypt(3, make_solve_dfs_noro(Uint8, 0x1, 32),
+                     make_keygen(Uint8, 0x1, 0x10, rotate=false),
+                     k -> (a, b) -> encrypt(k, a, b), 
+                     eq=same_ctext(16, encrypt))
+    # DFS, 32 bits, no rotation, 4 rounds
+    key_from_encrypt(1, make_solve_dfs_noro(Uint32, 0x4, 32),
+                     make_keygen(Uint32, 0x4, 0x10, rotate=false),
+                     k -> (a, b) -> encrypt(k, a, b), 
+                     eq=same_ctext(16, encrypt))
+    # beam limited dfs (doesn't help)
+    key_from_encrypt(3, make_solve_beam_noro(Uint8, 0x1, 32),
+                     make_keygen(Uint8, 0x1, 0x10, rotate=false),
+                     k -> (a, b) -> encrypt(k, a, b), 
+                     eq=same_ctext(16, encrypt))
 end
 
 
