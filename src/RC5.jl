@@ -2,6 +2,7 @@
 module RC5
 using Blocks, Solve, Tasks, Debug, GA
 
+
 # this includes a definition of RC5 (with and without rotation, but no
 # decryption, currently) and an implementation of the following attacks:
 #
@@ -434,6 +435,74 @@ function make_solve_ga{W<:Unsigned}(::Type{W}, r, k, len, limit, size, nchild)
 end
 
 
+# ---- dfs of state
+
+# the search proceeds from lsb to msb.  the nodes at each level correspond to
+# the binary values (increasing from zero) for the state for that bit.
+
+# at each level, half-blocks are encrypted and checked for the bits populated
+# so far.  at each level we check len random blocks.
+
+function uint_for_bits(n)
+    for u in (Uint8, Uint16, Uint32, Uint64)
+        if 8 * sizeof(u) >= n
+            return u
+        end
+    end
+    @assert false "no uint"
+end
+
+function make_solve_dfs{W<:Unsigned}(::Type{W}, r, len)
+
+    function solve(e)
+
+        ptext = collect((W, W), group(2, take(2*len, rands(W))))
+        ctext = (W,W)[e(a, b) for (a, b) in ptext]
+
+        function test(state, mask)
+            for ((a, b), (a1, b1)) in zip(ptext, ctext)
+                (a2, b2) = encrypt(state, a, b)
+                if a1 & mask != a2 & mask || b1 & mask != b2 & mask
+                    return false
+                end
+            end
+            true
+        end
+
+        width = 2r + 2
+        depth = 8*sizeof(W)
+        U = uint_for_bits(width)
+        state = State(r, zeros(W, width), rotate=false)
+        tree = zeros(U, depth)
+        level, wbit::W, mask::W, overflow::U = 1, 1, 1, 1 << width
+        while level > 0 && level <= depth
+            # copy current value to state
+            ubit::U, uval::U = 1, tree[level]
+            tree[level] = uval + 1
+            for i in 1:width
+                if uval & ubit == 0
+                    # why is mask needed here?
+                    state.s[i] = mask & state.s[i] & ~wbit
+                else
+                    state.s[i] = mask & state.s[i] | wbit
+                end
+                ubit = ubit << 1
+            end
+            if test(state, mask)
+                println("$level $(pad(uval)) $(bytes2hex(collect(Uint8, unpack(state.s))))")
+                level, wbit, mask = level + 1, wbit << 1, 1 + mask << 1
+            elseif tree[level] == overflow
+                tree[level] = 0
+                level, wbit, mask = level - 1, wbit >> 1, mask >> 1
+            else
+                # will try next node
+            end
+        end
+        state
+    end
+end
+
+
 # ---- validate solutions
 
 make_keygen(w, r, k; rotate=true) = 
@@ -442,6 +511,15 @@ fake_keygen(w, r, k; rotate=true) =
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
+    key_from_encrypt(3, make_solve_dfs(Uint8, 0x3, 32),
+                     make_keygen(Uint8, 0x3, 0x10, rotate=false),
+                     k -> (a, b) -> encrypt(k, a, b), 
+                     eq=same_ctext(16, encrypt))
+    key_from_encrypt(3, make_solve_dfs(Uint8, 0x1, 32),
+                     make_keygen(Uint8, 0x1, 0x10, rotate=false),
+                     k -> (a, b) -> encrypt(k, a, b), 
+                     eq=same_ctext(16, encrypt))
+    return
     # no rotation and zero rounds
     key_from_encrypt(3, make_solve_r0(Uint32, 0x2), 
                      make_keygen(Uint32, 0x0, 0x2),
