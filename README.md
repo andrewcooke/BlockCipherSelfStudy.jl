@@ -70,8 +70,8 @@ that finds the state.  This searches from least to most significant bit.
 
 Back-tracking for the first 2-4 bits dominates processing time.  Once those
 bits are OK, typically, no further backtracking at that level is necessary and
-moe significant bits are found rapidly and relatively independently.  I do not
-understand why - perhaps it is a bug, but the code gives valid results.
+more significant bits are found rapidly and (relatively) independently.  I do
+not understand why - perhaps it is a bug, but the code gives valid results.
 Adding a "beamwidth" limit to the search, or inverting or reversing the bits
 tried, does not help.
 
