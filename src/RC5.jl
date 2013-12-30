@@ -613,17 +613,17 @@ function solutions()
     key_from_encrypt(3, make_solve_dfs_noro(Uint8, 0x1, 32),
                      make_keygen(Uint8, 0x1, 0x10, rotate=false),
                      k -> (a, b) -> encrypt(k, a, b), 
-                     eq=same_ctext(16, encrypt))
+                     eq=same_ctext(64, encrypt))
     # DFS, 32 bits, no rotation, 4 rounds
     key_from_encrypt(1, make_solve_dfs_noro(Uint32, 0x4, 32),
                      make_keygen(Uint32, 0x4, 0x10, rotate=false),
                      k -> (a, b) -> encrypt(k, a, b), 
-                     eq=same_ctext(16, encrypt))
+                     eq=same_ctext(1024, encrypt))
     # beam limited dfs (doesn't help)
     key_from_encrypt(3, make_solve_beam_noro(Uint8, 0x1, 32),
                      make_keygen(Uint8, 0x1, 0x10, rotate=false),
                      k -> (a, b) -> encrypt(k, a, b), 
-                     eq=same_ctext(16, encrypt))
+                     eq=same_ctext(64, encrypt))
 end
 
 

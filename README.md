@@ -46,7 +46,7 @@ block.
 
 Extending the above, an adaptive attack (requiring about two blocks per bit)
 can
-[search](https://github.com/andrewcooke/BlockCipherSelfStudy.jl/blob/master/src/RC5.jl#L300)
+[search](https://github.com/andrewcooke/BlockCipherSelfStudy.jl/blob/master/src/RC5.jl#L295)
 for the plaintext, bit by bit.  This works because the only mixing between
 bits (without rotation) is via carry in additions.  So there are only 4
 combinations of lowest bit (for the two half-blocks) that affect the lowest
