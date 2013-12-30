@@ -471,7 +471,7 @@ function make_solve_dfs{W<:Unsigned}(::Type{W}, r, len)
 
         width = 2r + 2
         depth = 8*sizeof(W)
-        U = uint_for_bits(width)
+        U = uint_for_bits(width+1)  # extra bit for overflow
         state = State(r, zeros(W, width), rotate=false)
         tree = zeros(U, depth)
         level, wbit::W, mask::W, overflow::U = 1, 1, 1, 1 << width
@@ -480,8 +480,8 @@ function make_solve_dfs{W<:Unsigned}(::Type{W}, r, len)
             ubit::U, uval::U = 1, tree[level]
             tree[level] = uval + 1
             for i in 1:width
+                # mask below just keeps things neat
                 if uval & ubit == 0
-                    # why is mask needed here?
                     state.s[i] = mask & state.s[i] & ~wbit
                 else
                     state.s[i] = mask & state.s[i] | wbit
@@ -491,11 +491,12 @@ function make_solve_dfs{W<:Unsigned}(::Type{W}, r, len)
             if test(state, mask)
                 println("$level $(pad(uval)) $(bytes2hex(collect(Uint8, unpack(state.s))))")
                 level, wbit, mask = level + 1, wbit << 1, 1 + mask << 1
-            elseif tree[level] == overflow
-                tree[level] = 0
-                level, wbit, mask = level - 1, wbit >> 1, mask >> 1
             else
                 # will try next node
+            end
+            while level > 0 && level <= depth && tree[level] == overflow
+                tree[level] = 0
+                level, wbit, mask = level - 1, wbit >> 1, mask >> 1
             end
         end
         state
@@ -511,8 +512,8 @@ fake_keygen(w, r, k; rotate=true) =
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
-    key_from_encrypt(3, make_solve_dfs(Uint8, 0x3, 32),
-                     make_keygen(Uint8, 0x3, 0x10, rotate=false),
+    key_from_encrypt(3, make_solve_dfs(Uint32, 0x8, 32),
+                     make_keygen(Uint32, 0x8, 0x10, rotate=false),
                      k -> (a, b) -> encrypt(k, a, b), 
                      eq=same_ctext(16, encrypt))
     key_from_encrypt(3, make_solve_dfs(Uint8, 0x1, 32),
