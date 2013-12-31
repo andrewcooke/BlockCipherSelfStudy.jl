@@ -71,9 +71,10 @@ that finds the state.  This searches from least to most significant bit.
 Back-tracking for the first 2-4 bits dominates processing time.  Once those
 bits are OK, typically, no further backtracking at that level is necessary and
 more significant bits are found rapidly and (relatively) independently.  I do
-not understand why - perhaps it is a bug, but the code gives valid results.
-Adding a "beamwidth" limit to the search, or inverting or reversing the bits
-tried, does not help.
+not understand why - perhaps it is a bug, or perhaps it is simply that those
+bits cascade more (so there is some kind of geometric of exponential
+dependency on their values).  Adding a "beamwidth" limit to the search, or
+inverting or reversing the bits tried, does not help.
 
 <!--
 [![Build Status](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl.png)](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl)

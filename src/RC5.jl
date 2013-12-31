@@ -72,6 +72,7 @@ function rotatel{W<:Unsigned}(x::W, n::Unsigned)
     m = n % w
     convert(W, (x << m) | (x >>> (w - m)))
 end
+
 rotatel{W<:Unsigned}(::Type{W}, x::Integer, n::Integer) = 
 rotatel(convert(W, x), n)
 
@@ -109,12 +110,12 @@ function encrypt{W<:Unsigned}(s::State{W}, a::W, b::W)
     for i = 1:s.r
         a = a $ b
         if s.rotate
-            a = rotatel(W, a, b)
+            a = rotatel(a, b)
         end
         a = a + s.s[2i+1]
         b = b $ a
         if s.rotate
-            b = rotatel(W, b, a)
+            b = rotatel(b, a)
         end
         b = b + s.s[2i+2]
     end
@@ -488,62 +489,42 @@ function make_solve_dfs_noro{W<:Unsigned}(::Type{W}, r, len)
         level, overflow::U = 1, 1 << width
         while level > 0 && level <= depth
             set_state(state, tree, width, level)
-            tree[level] = tree[level] + 1
+            tree[level] += 1
             if test_bits(ptext, ctext, state, level)
-                println("$level/$depth $(pad(tree[level])) $(bytes2hex(collect(Uint8, unpack(state.s))))")
-                level = level + 1
+                println("$level/$depth $(pad(convert(U,tree[level]-0x1))) $(bytes2hex(collect(Uint8, unpack(state.s))))")
+                level += 1
             else
                 # will try next node
             end
             while level > 0 && level <= depth && tree[level] == overflow
-                tree[level], level = 0, level - 1
+                tree[level] = 0
+                level -= 1
             end
         end
         for i in 1:depth
-            println("$i $(pad(tree[i]))")
+            println("$i $(pad(convert(U,tree[i]-0x1)))")
         end
         state
     end
 end
 
-function make_solve_beam_noro{W<:Unsigned}(::Type{W}, r, len)
+# ---- show how different parts of the state affect output
 
-    # restrict dfs to limit choices at any level, and then increase
-    # limit slowly.  so forces earlier levels to backtrack if a lower
-    # level "can find no solution".  slows things down.
-
-    function solve(e)
-        ptext = collect((W, W), group(2, take(2*len, rands(W))))
-        ctext = (W,W)[e(a, b) for (a, b) in ptext]
-        width, depth = 2r+2, 8*sizeof(W)
-        U = uint_for_bits(width+1)  # extra bit for overflow
-        state = State(r, zeros(W, width), rotate=false)
-        overflow::U = 1 << width
-        for limit in [1 << w for w in 1:width]
-            tree, level, beam = zeros(U, depth), 1, zeros(Int, depth)
-            while level > 0
-                set_state(state, tree, width, level)
-                save, tree[level] = tree[level], tree[level] + 1
-                if test_bits(ptext, ctext, state, level)
-                    println("$(beam[level])/$limit $level/$depth $(pad(save)) $(bytes2hex(collect(Uint8, unpack(state.s))))")
-                    beam[level], level = beam[level] + 1, level + 1
-                    if level > depth
-                        for i in 1:depth
-                            println("$i $(pad(tree[i])) $(beam[i])")
-                        end
-                        return state
-                    else
-                        beam[level] = 0
-                    end
-                else
-#                    println("$(beam[level])/$limit $level/$depth $(pad(save))")
-                end
-                while level > 0 && (beam[level] > limit || tree[level] == overflow)
-                    tree[level], level = 0, level - 1
-                end
-            end
-         end
-        error("no solution")
+function show_state{W<:Unsigned}(::Type{W}, r; rotate=true)
+    state = State(r, zeros(W, sizeof(W) * (2r+2)), rotate=rotate)
+    z = zero(W)
+    a, b = encrypt(state, z, z)
+    println("default $(pad(a)) $(pad(b))")
+    function print_bit(state, bit, round)
+        state.s[round] = one(W) << (bit - 1)
+        a, b = encrypt(state, z, z)
+        println("bit $(bit) rnd $(round-1) $(pad(a)) $(pad(b))")
+        state.s[round] = zero(W)
+    end
+    for bit in [1,2,3,4,5,6,7,8]
+        for round in 1:(2r+2)
+            print_bit(state, bit, round)
+        end
     end
 end
 
@@ -556,11 +537,7 @@ fake_keygen(w, r, k; rotate=true) =
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
-    key_from_encrypt(1, make_solve_dfs_noro(Uint32, 0x6, 64),
-                     make_keygen(Uint32, 0x6, 0x10, rotate=false),
-                     k -> (a, b) -> encrypt(k, a, b), 
-                     eq=same_ctext(16, encrypt))
-    return
+    show_state(Uint8, 0x6, rotate=false)
     # no rotation and zero rounds
     key_from_encrypt(3, make_solve_r0(Uint32, 0x2), 
                      make_keygen(Uint32, 0x0, 0x2),
@@ -600,15 +577,15 @@ function solutions()
                        eq=same_ptext(),
                        encrypt2=k -> (a, b) -> encrypt(k, a, b))
     # GA, 8 bits, no rotation, 2 rounds
-    key_from_encrypt(3, make_solve_ga_noro(Uint8, 0x2, 0x10, 256, 100000, 1000, 100),
-                     make_keygen(Uint8, 0x2, 0x10, rotate=false),
-                     k -> ptext -> encrypt(k, ptext), 
-                     eq=same_ctext(256, encrypt))
+#    key_from_encrypt(1, make_solve_ga_noro(Uint8, 0x2, 0x10, 256, 100000, 1000, 100),
+#                     make_keygen(Uint8, 0x2, 0x10, rotate=false),
+#                     k -> ptext -> encrypt(k, ptext), 
+#                     eq=same_ctext(256, encrypt))
     # GA, 32 bits, no rotation, 1 round
-    key_from_encrypt(3, make_solve_ga_noro(Uint32, 0x1, 0x10, 256, 100000, 1000, 100),
-                     make_keygen(Uint32, 0x1, 0x10, rotate=false),
-                     k -> ptext -> encrypt(k, ptext), 
-                     eq=same_ctext(256, encrypt))
+#    key_from_encrypt(1, make_solve_ga_noro(Uint32, 0x1, 0x10, 256, 100000, 1000, 100),
+#                     make_keygen(Uint32, 0x1, 0x10, rotate=false),
+#                     k -> ptext -> encrypt(k, ptext), 
+#                     eq=same_ctext(256, encrypt))
     # DFS, 8 bits, no rotation, 1 round
     key_from_encrypt(3, make_solve_dfs_noro(Uint8, 0x1, 32),
                      make_keygen(Uint8, 0x1, 0x10, rotate=false),
@@ -619,11 +596,6 @@ function solutions()
                      make_keygen(Uint32, 0x4, 0x10, rotate=false),
                      k -> (a, b) -> encrypt(k, a, b), 
                      eq=same_ctext(1024, encrypt))
-    # beam limited dfs (doesn't help)
-    key_from_encrypt(3, make_solve_beam_noro(Uint8, 0x1, 32),
-                     make_keygen(Uint8, 0x1, 0x10, rotate=false),
-                     k -> (a, b) -> encrypt(k, a, b), 
-                     eq=same_ctext(64, encrypt))
 end
 
 
@@ -671,7 +643,7 @@ function tests()
 end
 
 
-tests()
-solutions()
+#tests()
+#solutions()
 
 end
