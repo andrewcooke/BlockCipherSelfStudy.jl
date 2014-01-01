@@ -107,7 +107,7 @@ function encrypt{W<:Unsigned}(s::State{W}, a::W, b::W)
     # encrypt two half-blocks
     a::W = a + s.s[1]
     b::W = b + s.s[2]
-    for i = 1:s.r
+    for i in 1:s.r
         a = a $ b
         if s.rotate
             a = rotatel(a, b)
@@ -485,25 +485,26 @@ function make_solve_dfs_noro{W<:Unsigned}(::Type{W}, r, len)
         ctext = (W,W)[e(a, b) for (a, b) in ptext]
         width, depth = 2r+2, 8*sizeof(W)
         U = uint_for_bits(width+1)  # extra bit for overflow
-        U = Uint64 # faster than minimum size above (left in for error check)
+        U = Uint64  # faster than minimum size above (left in for error check)
         state = State(r, zeros(W, width), rotate=false)
         overflow::U, inc::U, start::U = 1 << width, one(U), zero(U)
         function inner(level)
             if level > depth
-                return true
-            end
-            row = start
-            while row != overflow
-                set_state!(state, row, width, level)
-                if test_bits(ptext, ctext, state, level)
-#                    println("$level/$depth $(pad(convert(U,tree[level]-0x1))) $(bytes2hex(collect(Uint8, unpack(state.s))))")
-                    if inner(level + 1)
-                        return true
+                true
+            else
+                row = start
+                while row != overflow
+                    set_state!(state, row, width, level)
+                    if test_bits(ptext, ctext, state, level)
+#                        println("$level/$depth $(pad(convert(U,tree[level]-0x1))) $(bytes2hex(collect(Uint8, unpack(state.s))))")
+                        if inner(level + 1)
+                            return true
+                        end
                     end
+                    row = row + inc
                 end
-                row = row + inc
+                false
             end
-            return false
         end
         if inner(1)
             state
@@ -547,7 +548,7 @@ function solutions()
                      fake_keygen(Uint32, 0x4, 0x10, rotate=false),
                      k -> (a, b) -> encrypt(k, a, b), 
                      eq=same_ctext(1024, encrypt))
-    @time key_from_encrypt(1, make_solve_dfs_noro(Uint32, 0x4, 32),
+    @profile key_from_encrypt(1, make_solve_dfs_noro(Uint32, 0x4, 32),
                      fake_keygen(Uint32, 0x4, 0x10, rotate=false),
                      k -> (a, b) -> encrypt(k, a, b), 
                      eq=same_ctext(1024, encrypt))
