@@ -489,7 +489,7 @@ function make_solve_dfs_noro{W<:Unsigned}(::Type{W}, r, len)
         U = Uint64 # faster than minimum size above (left in for error check)
         state = State(r, zeros(W, width), rotate=false)
         tree = zeros(U, depth)
-        level, overflow::U = 1, 1 << width
+        level, overflow::U, inc = 1, 1 << width, one(U)
         while level > 0 && level <= depth
             set_state(state, tree, width, level)
             tree[level] += inc
