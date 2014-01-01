@@ -126,10 +126,9 @@ function encrypt{W<:Unsigned}(s::State{W}, plain)
     # encrypt a stream of bytes
     e = Task() do
         for ab in group(2, pack(W, plain))
-            c, d = encrypt(s, ab...)
-#            println("$(pad(ab[1])) $(pad(ab[2])) -> $(pad(c)) $(pad(d))")
-            produce(c)
-            produce(d)
+            a, b = encrypt(s, ab[1], ab[2])
+            produce(a)
+            produce(b)
         end
     end
     unpack(W, e)
@@ -455,8 +454,11 @@ end
 
 function test_bits{W<:Unsigned}(ptext, ctext, state::State{W}, level)
     mask::W = convert(W, 1 << level) - 1
-    for ((a, b), (a1, b1)) in zip(ptext, ctext)
-        (a2, b2) = encrypt(state, a, b)
+    # much faster than zip
+    for i in 1:length(ptext)
+        a, b = ptext[i]
+        a1, b1 = ctext[i]
+        a2, b2 = encrypt(state, a, b)
         if a1 & mask != a2 & mask || b1 & mask != b2 & mask
             return false
         end
@@ -484,14 +486,15 @@ function make_solve_dfs_noro{W<:Unsigned}(::Type{W}, r, len)
         ctext = (W,W)[e(a, b) for (a, b) in ptext]
         width, depth = 2r+2, 8*sizeof(W)
         U = uint_for_bits(width+1)  # extra bit for overflow
+        U = Uint64 # faster than minimum size above (left in for error check)
         state = State(r, zeros(W, width), rotate=false)
         tree = zeros(U, depth)
-        level, overflow::U = 1, 1 << width
+        level, overflow::U, inc = 1, 1 << width, one(U)
         while level > 0 && level <= depth
             set_state(state, tree, width, level)
-            tree[level] += 1
+            tree[level] += inc
             if test_bits(ptext, ctext, state, level)
-                println("$level/$depth $(pad(convert(U,tree[level]-0x1))) $(bytes2hex(collect(Uint8, unpack(state.s))))")
+#                println("$level/$depth $(pad(convert(U,tree[level]-0x1))) $(bytes2hex(collect(Uint8, unpack(state.s))))")
                 level += 1
             else
                 # will try next node
@@ -537,6 +540,15 @@ fake_keygen(w, r, k; rotate=true) =
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
+    @time key_from_encrypt(1, make_solve_dfs_noro(Uint32, 0x3, 32),
+                     fake_keygen(Uint32, 0x3, 0x10, rotate=false),
+                     k -> (a, b) -> encrypt(k, a, b), 
+                     eq=same_ctext(1024, encrypt))
+    @time key_from_encrypt(1, make_solve_dfs_noro(Uint32, 0x3, 32),
+                     fake_keygen(Uint32, 0x3, 0x10, rotate=false),
+                     k -> (a, b) -> encrypt(k, a, b), 
+                     eq=same_ctext(1024, encrypt))
+    return
     show_state(Uint8, 0x6, rotate=false)
     # no rotation and zero rounds
     key_from_encrypt(3, make_solve_r0(Uint32, 0x2), 
@@ -643,7 +655,7 @@ function tests()
 end
 
 
-#tests()
-#solutions()
+tests()
+solutions()
 
 end
