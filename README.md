@@ -78,9 +78,8 @@ inverting or reversing the bits tried, does not help.
 
 ### Relection
 
-With no rotation, the first block of state can be set to zero for attacks on
-the state itself.  With no rotation, each round is a bit permutation
-characterised by the state for that rotation, only.
+With no rotation, and ignoring the initial offset, each round is a bit
+permutation characterised by the state for that rotation, only.
 
 So it seems like we may be able to tabulate the permutations in a single round
 (for some small number of bits) and use that to improve the speed of the

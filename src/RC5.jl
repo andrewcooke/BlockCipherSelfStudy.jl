@@ -488,7 +488,7 @@ function make_solve_dfs_noro{W<:Unsigned}(::Type{W}, r, len)
         U = Uint64  # faster than minimum size above (left in for error check)
         state = State(r, zeros(W, width), rotate=false)
         # start from 2 since first state doesn't do anything useful
-        overflow::U, inc::U, start::U = 1 << width, one(U), zero(U) << 1
+        overflow::U, inc::U, start::U = 1 << width, one(U), zero(U)
         function inner(level)
             if level > depth
                 true
@@ -545,8 +545,8 @@ fake_keygen(w, r, k; rotate=true) =
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
-    @time key_from_encrypt(10, make_solve_dfs_noro(Uint32, 0x4, 32),
-                     make_keygen(Uint32, 0x4, 0x10, rotate=false),
+    @time key_from_encrypt(1, make_solve_dfs_noro(Uint32, 0x4, 32),
+                     fake_keygen(Uint32, 0x4, 0x10, rotate=false),
                      k -> (a, b) -> encrypt(k, a, b), 
                      eq=same_ctext(1024, encrypt))
     return
