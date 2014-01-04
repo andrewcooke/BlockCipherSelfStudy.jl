@@ -427,7 +427,7 @@ function GA.score{W<:Unsigned}(c::Context, s::State{W})
     (score, good)
 end
 
-function make_solve_ga_noro{W<:Unsigned}(::Type{W}, r, k, len, limit, size, nchild)
+function make_ga_noro{W<:Unsigned}(::Type{W}, r, k, len, limit, size, nchild)
     @assert len % sizeof(W) == 0
     function solve(e)
         ptext = collect(Uint8, take(len, rands(Uint8)))
@@ -485,7 +485,7 @@ function set_state!{W<:Unsigned, U<:Unsigned}(state::State{W}, row::U, width::In
     end
 end
 
-function make_solve_dfs_noro{W<:Unsigned}(::Type{W}, r, len)
+function make_dfs_noro{W<:Unsigned}(::Type{W}, r, len)
     function solve(e)
         ptext = collect((W, W), group(2, take(2*len, rands(W))))
         ctext = (W,W)[e(a, b) for (a, b) in ptext]
@@ -493,7 +493,6 @@ function make_solve_dfs_noro{W<:Unsigned}(::Type{W}, r, len)
         U = uint_for_bits(width+1)  # extra bit for overflow
         U = Uint64  # faster than minimum size above (left in for error check)
         state = State(r, zeros(W, width), rotate=false)
-        # start from 2 since first state doesn't do anything useful
         overflow::U, inc::U, start::U = 1 << width, one(U), zero(U)
         function inner(level)
             if level > depth
@@ -718,22 +717,22 @@ function solutions()
                        eq=same_ptext(),
                        encrypt2=k -> (a, b) -> encrypt(k, a, b))
     # GA, 8 bits, no rotation, 2 rounds
-#    key_from_encrypt(1, make_solve_ga_noro(Uint8, 0x2, 0x10, 256, 100000, 1000, 100),
+#    key_from_encrypt(1, make_ga_noro(Uint8, 0x2, 0x10, 256, 100000, 1000, 100),
 #                     make_keygen(Uint8, 0x2, 0x10, rotate=false),
 #                     k -> ptext -> encrypt(k, ptext), 
 #                     eq=same_ctext(256, encrypt))
     # GA, 32 bits, no rotation, 1 round
-#    key_from_encrypt(1, make_solve_ga_noro(Uint32, 0x1, 0x10, 256, 100000, 1000, 100),
+#    key_from_encrypt(1, make_ga_noro(Uint32, 0x1, 0x10, 256, 100000, 1000, 100),
 #                     make_keygen(Uint32, 0x1, 0x10, rotate=false),
 #                     k -> ptext -> encrypt(k, ptext), 
 #                     eq=same_ctext(256, encrypt))
     # DFS, 8 bits, no rotation, 1 round
-    key_from_encrypt(3, make_solve_dfs_noro(Uint8, 0x1, 32),
+    key_from_encrypt(3, make_dfs_noro(Uint8, 0x1, 32),
                      make_keygen(Uint8, 0x1, 0x10, rotate=false),
                      k -> (a, b) -> encrypt(k, a, b), 
                      eq=same_ctext(64, encrypt))
     # DFS, 32 bits, no rotation, 4 rounds
-    key_from_encrypt(1, make_solve_dfs_noro(Uint32, 0x4, 32),
+    key_from_encrypt(1, make_dfs_noro(Uint32, 0x4, 32),
                      make_keygen(Uint32, 0x4, 0x10, rotate=false),
                      k -> (a, b) -> encrypt(k, a, b), 
                      eq=same_ctext(1024, encrypt))
