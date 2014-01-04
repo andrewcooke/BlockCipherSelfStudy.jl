@@ -669,6 +669,56 @@ function encrypt{W<:Unsigned}(cache, s::State{W}, a::W, b::W)
 end
                     
 
+function make_cached_dfs_noro{W<:Unsigned}(::Type{W}, r, len)
+    function solve(e)
+        cache = precalc()
+        ptext = collect((W, W), group(2, take(2*len, rands(W))))
+        ctext = (W,W)[e(a, b) for (a, b) in ptext]
+        width, depth = 2r+2, 8*sizeof(W)
+        U = uint_for_bits(width+1)  # extra bit for overflow
+        U = Uint64  # faster than minimum size above (left in for error check)
+        carries = zeros(U, len, depth+1)
+        state = State(r, zeros(W, width), rotate=false)
+        overflow::U, inc::U, start::U = 1 << width, one(U), zero(U)
+        function test(state, level::Int)
+            mask::W = convert(W, 1 << level) - 1
+            # much faster than zip
+            for i in 1:length(ptext)
+                a, b = ptext[i]
+                a1, b1 = ctext[i]
+                a2, b2, carries[1,level+1] = encrypt_bit(cache, r, a >> (level-1), b >> (level-1), carries[i,level])
+                if a1 >> (level-1) != a2 || b1 >> (level-1) != b2
+                    return false
+                end
+            end
+            true
+        end
+        function inner(level)
+            if level > depth
+                true
+            else
+                row = start
+                while row != overflow
+                    if test_bits(row, level)
+#                        println("$level/$depth $(pad(convert(U,tree[level]-0x1))) $(bytes2hex(collect(Uint8, unpack(state.s))))")
+                        if inner(level + 1)
+                            return true
+                        end
+                    end
+                    row = row + inc
+                end
+                false
+            end
+        end
+        if inner(1)
+            state
+        else
+            error("no solution")
+        end
+    end
+end
+
+
 # ---- validate solutions
 
 make_keygen(w, r, k; rotate=true) = 
@@ -677,6 +727,11 @@ fake_keygen(w, r, k; rotate=true) =
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
+    key_from_encrypt(1, make_cached_dfs_noro(Uint32, 0x4, 32),
+                     make_keygen(Uint32, 0x4, 0x10, rotate=false),
+                     k -> (a, b) -> encrypt(k, a, b), 
+                     eq=same_ctext(1024, encrypt))
+    return
     show_state(Uint8, 0x6, rotate=false)
     # no rotation and zero rounds
     key_from_encrypt(3, make_solve_r0(Uint32, 0x2), 
