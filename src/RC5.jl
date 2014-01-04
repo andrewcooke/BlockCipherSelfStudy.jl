@@ -105,18 +105,24 @@ end
 
 function encrypt{W<:Unsigned}(s::State{W}, a::W, b::W)
     # encrypt two half-blocks
+#    println("a $(pad(a)) + $(pad(s.s[1]))")
     a::W = a + s.s[1]
+#    println("b $(pad(b)) + $(pad(s.s[2]))")
     b::W = b + s.s[2]
     for i in 1:s.r
+#        println("a $(pad(a)) x $(pad(b))")
         a = a $ b
         if s.rotate
             a = rotatel(a, b)
         end
+#        println("a $(pad(a)) + $(pad(s.s[2i+1]))")
         a = a + s.s[2i+1]
+#        println("b $(pad(b)) x $(pad(a))")
         b = b $ a
         if s.rotate
             b = rotatel(b, a)
         end
+#        println("b $(pad(b)) + $(pad(s.s[2i+2]))")
         b = b + s.s[2i+2]
     end
     a, b
@@ -537,6 +543,133 @@ function show_state{W<:Unsigned}(::Type{W}, r; rotate=true)
 end
 
 
+# ---- dfs for state using pre-calculated cache
+
+# ignoring the initial add for a moment, the encryption is based on rounds
+# that are defined, for a single bit, by:
+# - the current a and b value
+# - carry from the previous bits (a and b, 2 per round)
+# - the state of the cipher (a and b per, 2 per round)
+# and the result is a value and a carry for a and b.
+# so in general, for N rounds we need 2 + N (2 + 2) bits of input and 
+# generate 2 + N * 2 bits of output (a, b and the carries for each round).
+
+# N        1      2     3      4
+# in       6      10    14     18
+# out      4      6     8      10
+# storage  256B   1kB   16kB   512kB
+
+# but given that we need to use 16bit for n+4 anyway, we can store all
+# results in a single table (out=16 for N=4).
+
+# packed format:
+# input   lsb  carriesx8, statex8, abx2  msb
+# output  lsb  carriesx8, resultsx8  msb
+
+function precalc()
+    const size = 2^18
+    # single round
+    tmp1 = zeros(Uint16, size)
+    for carries in convert(Uint, 0x0):convert(Uint, 0x3)
+        ac, bc = carries & 0x1, carries & 0x2 >> 1
+        for state in convert(Uint, 0x0):convert(Uint, 0x3)
+            s1, s2 = state & 0x1, state & 0x2 >> 1
+            for ab in convert(Uint, 0x0):convert(Uint, 0x3)
+                a, b = ab & 0x1, ab & 0x2 >> 1
+                a = a $ b
+                a = a + s1 + ac
+                b = b $ (a & 0x1)
+                b = b + s2 + bc
+                in = carries | state << 8 | ab << 16
+                out::Uint16 = (a & 0x2) >> 1 | (b & 0x2) | (a & 0x1) << 8 | (b & 0x1) << 9
+#                println("1 $(pad(convert(Uint32, in))) -> $(pad(out))")
+                tmp1[in+1] = out
+            end
+        end
+    end
+    # two rounds
+    tmp2 = zeros(Uint16, size)
+    for carries in convert(Uint, 0x0):convert(Uint, 0xf)
+        for state in convert(Uint, 0x0):convert(Uint, 0xf)
+            for ab in convert(Uint, 0x0):convert(Uint, 0x3)
+                r1::Uint = tmp1[(carries & 0x3 | state & 0x3 << 8 | ab << 16)+1]
+                r2::Uint = tmp1[(carries & 0xc >> 2 | state & 0xc << 6 | r1 & 0x300 << 8)+1]
+                in = carries | state << 8 | ab << 16
+                out::Uint16 = r1 & 0x3 | r2 & 0x3 << 2 | r1 & 0x300 | r2 & 0x300 << 2
+#                println("2 $(pad(convert(Uint32, in))) -> $(pad(out))")
+                tmp2[in+1] = out
+            end
+        end
+    end
+    # four rounds
+    cache = zeros(Uint16, size)
+    for carries in convert(Uint, 0x0):convert(Uint, 0xff)
+#        println("$(pad(convert(Uint8, carries)))/ff")
+        for state in convert(Uint, 0x0):convert(Uint, 0xff)
+            for ab in convert(Uint, 0x0):convert(Uint, 0x3)
+                r12::Uint = tmp2[(carries & 0xf | state & 0xf << 8 | ab << 16)+1]
+                r34::Uint = tmp2[(carries & 0xf0 >> 4 | state & 0xf0 << 4 | r12 & 0xc00 << 6)+1]
+                in::Uint = carries | state << 8 | ab << 16
+                out::Uint16 = r12 & 0xf | r34 & 0xf << 4 | r12 & 0xf00 | r34 & 0xf00 << 4
+#                println("4 $(pad(convert(Uint32, in))) -> $(pad(out))")
+                cache[in+1] = out
+            end
+        end
+    end
+    cache
+end
+
+function encrypt_bit(cache, r, a, b, state_in, offset, carries_in, carries_out)
+#    println("round $offset/$r  $a $b  $(pad(state_in)) $(pad(carries_in)) $(pad(carries_out))")
+    n = min(4, r - offset)
+    if n == 0
+        return a, b, carries_out
+    else
+        in::Uint = carries_in & 0xff | state_in & 0xff << 8 | a & 0x01 << 16 | b & 0x01 << 17
+        out::Uint = cache[in+1]
+#        println("$(pad(in)) -> $(pad(out))")
+        a = (out >> (6 + 2n)) & 0x1
+        b = (out >> (7 + 2n)) & 0x1
+        state_in = state_in >> 2n
+        carries_in = carries_in >> 2n
+        carries_out = carries_out | (out & ((1 << 2n) - 1)) << 2*offset
+        return encrypt_bit(cache, r, a, b, state_in, offset+n, carries_in, carries_out)
+    end
+end
+
+function encrypt_bit(cache, r, a, b, state, carries)
+    # the cache doesn't include the first two additions
+    a::Uint = a + (state & 0x1) + (carries & 0x1)
+    b::Uint = b + (state & 0x2 >> 1) + (carries & 0x2 >> 1)
+    ap, bp, carries_out = encrypt_bit(cache, r, a & 0x1, b & 0x1, state >> 2, 0x0, carries >> 2, 0x0)
+    ap, bp, (a & 0x2 >> 1) | (b & 0x2) | (carries_out << 2)
+end
+
+function extract_state(s::State, bit)
+    state::Uint, mask::Uint = 0x0, one(Uint) << (bit -1)
+    for i in (2s.r+2):-1:1
+        state = state << 1
+        if s.s[i] & mask != 0
+            state = state | 0x1
+        end
+    end
+#    println("state $bit $(pad(state))")
+    state
+end
+
+function encrypt{W<:Unsigned}(cache, s::State{W}, a::W, b::W)
+    carries::Uint  = 0x0
+    ap::W, bp::W = 0x0, 0x0
+    for i in 1:8*sizeof(W)
+        c::W, d::W, carries = encrypt_bit(cache, s.r, a & 0x1, b & 0x1, extract_state(s, i), carries)
+#        println("bit $i  $(a & 0x1) $(b & 0x1)  $c $d  $(pad(carries))")
+        a, b = a >> 1, b >> 1
+        ap, bp = ap | (c << (i-1)), bp | (d << (i-1))
+    end
+    ap, bp
+end
+                    
+
 # ---- validate solutions
 
 make_keygen(w, r, k; rotate=true) = 
@@ -545,11 +678,6 @@ fake_keygen(w, r, k; rotate=true) =
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
-    @time key_from_encrypt(1, make_solve_dfs_noro(Uint32, 0x4, 32),
-                     fake_keygen(Uint32, 0x4, 0x10, rotate=false),
-                     k -> (a, b) -> encrypt(k, a, b), 
-                     eq=same_ctext(1024, encrypt))
-    return
     show_state(Uint8, 0x6, rotate=false)
     # no rotation and zero rounds
     key_from_encrypt(3, make_solve_r0(Uint32, 0x2), 
@@ -649,14 +777,39 @@ function test_8()
     @assert b == 0xea b
 end
 
+function assert_cache{W<:Unsigned}(cache, state::State{W})
+    println("$state")
+    a::W, b::W = 0x1, 0x2
+    c, d = encrypt(state, a, b)
+    e, f = encrypt(cache, state, a, b)
+    println("$W $(state.r)  $(pad(a)) $(pad(b))  $(pad(c)) $(pad(d))  $(pad(e)) $(pad(f))")
+    @assert c == e a
+    @assert d == f b
+end
+
+function test_cache()
+    cache = precalc()
+    z = zeros(Uint8, 16)
+    assert_cache(cache, State(Uint8, 0x0, z, rotate=false))
+    assert_cache(cache, State(Uint8, 0x1, z, rotate=false))
+    assert_cache(cache, State(Uint8, 0x2, z, rotate=false))
+    assert_cache(cache, State(Uint8, 0x3, z, rotate=false))
+    assert_cache(cache, State(Uint8, 0x4, z, rotate=false))
+    assert_cache(cache, State(Uint8, 0x8, z, rotate=false))
+    assert_cache(cache, State(Uint8, 0x6, z, rotate=false))
+    assert_cache(cache, State(Uint32, 0x0, z, rotate=false))
+    assert_cache(cache, State(Uint32, 0x8, z, rotate=false))
+end
+
 function tests()
     test_rotatel()
     test_vectors()
     test_8()
+    test_cache()
 end
 
 
 tests()
-solutions()
+#solutions()
 
 end
