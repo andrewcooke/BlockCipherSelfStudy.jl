@@ -727,6 +727,256 @@ function make_cached_dfs_noro{W<:Unsigned}(::Type{W}, r::Uint, len::Uint, cache)
 end
 
 
+# ---- dfs for state using pre-calculated cache
+
+# a lookup table (by bit, for all rounds) needs as key:
+# - a, b
+# - the state (2r+2 bits)
+# - carry from the previous bit (2r+2 bits)
+# the output is:
+# - a, b (2 or 2r+2 for variable rounds)
+# - carry to the next bit (2r+2 bits)
+
+# r     0     1    2     3      4      6      8
+# in    6     10   14    18     22     30     38
+# out   4/4   6/8  8/12  10/16  12/20  16/28  20/36
+# min   256B  1kB  16kB  512kB  
+
+# if we ignore the zeroth round (ie for appending later rounds)
+
+# r     1     2    3     4      6      8
+# in    6     10   14    18     26     34
+# out   4/4   6/8  8/12  10/16  12/20  16/28
+# min   256B  1kB  16kB  512kB  
+
+# if we want to get to 8 rounds AND store the zeroth round (earlier attempt
+# didn't and it was ugly) then it seems like we need 3 table lookups, for 0-2,
+# 3-5 and 6-8 (last two same table).  for 1B data with no intermediate results
+# those are 16kB; if we store Uint64 then they will be 128kB.  i have l1=64kB,
+# l2=256kB (both per core), and l3=2MB (shared).
+
+# a previous attempt, storing intermediate results and halding zeroth round
+# separately was very slow.
+
+# so let's try with two small 16kB tables, aiming only for exact round counts
+# (so 2, 5 or 8 rounds).  want core code to be very simple table lookups with
+# minimal extra work.
+
+# packing:
+#   lsb  ab carries state msb
+# this lets us directly carry over the result for lookup needing only a
+# shift and add for state.
+
+function set(word::Uint, bit::Int, value::Uint)
+    mask::Uint = 1 << (bit - 1)
+    return (word & ~mask) | (value & 0x1) << (bit - 1)
+end
+
+function set(word::Uint, bit::Int, value::Uint, len::Int)
+    bit = bit - 1
+    mask::Uint = 1 << (bit+len) - 1 << bit
+    return (word & ~mask) | (value & mask) << bit
+end
+
+function precalc2()
+
+    const SIZE = 2^14
+    const ZERO = zero(Uint)
+    const ONE = one(Uint)
+    const THREE = ONE+ONE+ONE
+
+    # cache a single round
+    one_round = zeros(Uint, 2^6)
+    for a in ZERO:ONE
+        in = a
+        for b in ZERO:ONE
+            in = set(in, 2, b)
+            for ca in ZERO:ONE
+                in = set(in, 3, ca)
+                for cb in ZERO:ONE
+                    in = set(in, 4, cb)
+                    for s1 in ZERO:ONE
+                        in = set(in, 5, s1)
+                        for s2 in ZERO:ONE
+                            in = set(in, 6, s2)
+                            A = a $ b
+                            A = A + s1 + ca
+                            B = b $ A
+                            B = B + s2 + cb
+                            out = (A & 0x1) | (B & 0x1) | (A & 0x2) << 1 | (B & 0x2) << 2
+                            one_round[in+1] = out
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    # table including initial addition + 2 rounds
+    table1 = zeros(Uint8, SIZE)   
+    for a in ZERO:ONE
+        in = a
+        for b in ZERO:ONE
+            in = set(in, 2, b)
+            for c1 in ZERO:ONE
+                in = set(in, 3, c1)
+                for c2 in ZERO:ONE
+                    in = set(in, 4, c2)
+                    for s1 in ZERO:ONE
+                        in = set(in, 9, s1)
+                        A = a + s1 + c1
+                        out = set(out, 3, A >> 1)
+                        in2 = A & 0x1
+                        for s2 in ZERO:ONE
+                            in = set(in, 10, s2)
+                            B = b + s2 + c2
+                            out = set(out, 4, B >> 1)
+                            in2 = set(in2, 2, B)
+                            for c34 in ZERO:THREE
+                                in2 = set(in2, 3, c34, 2)
+                                for s34 in ZERO:THREE
+                                    in2 = set(in2, 5, s34, 2)
+                                    out2 = one_round[in2+1]
+                                    out = set(out, 5, out2 >> 2, 2)
+                                    in3 = out2 & 0x3
+                                    for c56 in ZERO:THREE
+                                        in3 = set(in3, 3, c56, 2)
+                                        for s56 in ZERO:THREE
+                                            in2 = set(in3, 5, s56, 2)
+                                            out3 = one_round[in3+1]
+                                            out = set(out, 7, out3 >> 2, 2)
+                                            table1[in+1] = out
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    # table including 3 rounds
+    table2 = zeros(Uint8, SIZE)
+    for ab in ZERO:THREE
+        in = ab
+        in1 = ab
+        for c12 in ZERO:THREE
+            in = set(in, 3, c12, 2)
+            in1 = set(in1, 3, c12, 2)
+            for s12 in ZERO:THREE
+                in = set(in, 9, s12, 2)
+                in1 = set(in1, 5, s12, 2)
+                out1 = one_round[in1+1]
+                out = set(out, 3, out1 >> 2, 2)
+                in2 = out1 & 0x3
+                for c34 in ZERO:THREE
+                    in = set(in, 5, c34, 2)
+                    in2 = set(in2, 3, c34, 2)
+                    for s34 in ZERO:THREE
+                        in = set(in, 11, s34, 2)
+                        in2 = set(in2, 5, s34, 2)
+                        out2 = one_round[in2+1]
+                        out = set(out, 5, out2 >> 2, 2)
+                        in3 = out2 & 0x3
+                        for c56 in ZERO:THREE
+                            in = set(in, 7, c56, 2)
+                            in3 = set(in2, 3, c56, 2)
+                            for s56 in ZERO:THREE
+                                in = set(in, 13, s56, 2)
+                                in3 = set(in3, 5, s56, 2)
+                                out3 = one_round[in3+1]
+                                out = set(out, 7, out3 >> 2, 2)
+                                table2[in+1] = out
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    table1, table2
+end
+
+
+
+# ignoring the initial add for a moment, the encryption is based on rounds
+# that are defined, for a single bit, by:
+# - the current a and b value
+# - carry from the previous bits (a and b, 2 per round)
+# - the state of the cipher (a and b per, 2 per round)
+# and the result is a value and a carry for a and b.
+# so in general, for N rounds we need 2 + N (2 + 2) bits of input and 
+# generate 2 + N * 2 bits of output (a, b and the carries for each round).
+
+# N        1      2     3      4
+# in       6      10    14     18
+# out      4      6     8      10
+# storage  256B   1kB   16kB   512kB
+
+# but given that we need to use 16bit for n+4 anyway, we can store all
+# results in a single table (out=16 for N=4).
+
+# packed format:
+# input   lsb  carriesx8, statex8, abx2  msb
+# output  lsb  carriesx8, resultsx8  msb
+
+function precalc()
+    const size = 2^18
+    # single round
+    tmp1 = zeros(Uint16, size)
+    for carries in convert(Uint, 0x0):convert(Uint, 0x3)
+        ac, bc = carries & 0x1, carries & 0x2 >> 1
+        for state in convert(Uint, 0x0):convert(Uint, 0x3)
+            s1, s2 = state & 0x1, state & 0x2 >> 1
+            for ab in convert(Uint, 0x0):convert(Uint, 0x3)
+                a, b = ab & 0x1, ab & 0x2 >> 1
+                a = a $ b
+                a = a + s1 + ac
+                b = b $ (a & 0x1)
+                b = b + s2 + bc
+                in = carries | state << 8 | ab << 16
+                out::Uint16 = (a & 0x2) >> 1 | (b & 0x2) | (a & 0x1) << 8 | (b & 0x1) << 9
+#                println("1 $(pad(convert(Uint32, in))) -> $(pad(out))")
+                tmp1[in+1] = out
+            end
+        end
+    end
+    # two rounds
+    tmp2 = zeros(Uint16, size)
+    for carries in convert(Uint, 0x0):convert(Uint, 0xf)
+        for state in convert(Uint, 0x0):convert(Uint, 0xf)
+            for ab in convert(Uint, 0x0):convert(Uint, 0x3)
+                r1::Uint = tmp1[(carries & 0x3 | state & 0x3 << 8 | ab << 16)+1]
+                r2::Uint = tmp1[(carries & 0xc >> 2 | state & 0xc << 6 | r1 & 0x300 << 8)+1]
+                in = carries | state << 8 | ab << 16
+                out::Uint16 = r1 & 0x3 | r2 & 0x3 << 2 | r1 & 0x300 | r2 & 0x300 << 2
+#                println("2 $(pad(convert(Uint32, in))) -> $(pad(out))")
+                tmp2[in+1] = out
+            end
+        end
+    end
+    # four rounds
+    cache = zeros(Uint16, size)
+    for carries in convert(Uint, 0x0):convert(Uint, 0xff)
+#        println("$(pad(convert(Uint8, carries)))/ff")
+        for state in convert(Uint, 0x0):convert(Uint, 0xff)
+            for ab in convert(Uint, 0x0):convert(Uint, 0x3)
+                r12::Uint = tmp2[(carries & 0xf | state & 0xf << 8 | ab << 16)+1]
+                r34::Uint = tmp2[(carries & 0xf0 >> 4 | state & 0xf0 << 4 | r12 & 0xc00 << 6)+1]
+                in::Uint = carries | state << 8 | ab << 16
+                out::Uint16 = r12 & 0xf | r34 & 0xf << 4 | r12 & 0xf00 | r34 & 0xf00 << 4
+#                println("4 $(pad(convert(Uint32, in))) -> $(pad(out))")
+                cache[in+1] = out
+            end
+        end
+    end
+    cache
+end
+
+
 # ---- validate solutions
 
 make_keygen(w, r, k; rotate=true) = 
@@ -735,6 +985,8 @@ fake_keygen(w, r, k; rotate=true) =
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
+    cache = precalc2()
+    return
     cache = precalc()
 #    @time key_from_encrypt(1, make_cached_dfs_noro(Uint32, 0x3, 32, cache),
 #                     fake_keygen(Uint32, 0x3, 0x10, rotate=false),
