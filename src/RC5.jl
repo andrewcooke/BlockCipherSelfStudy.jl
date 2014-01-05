@@ -755,7 +755,7 @@ end
 # those are 16kB; if we store Uint64 then they will be 128kB.  i have l1=64kB,
 # l2=256kB (both per core), and l3=2MB (shared).
 
-# a previous attempt, storing intermediate results and halding zeroth round
+# a previous attempt, storing intermediate results and handling zeroth round
 # separately was very slow.
 
 # so let's try with two small 16kB tables, aiming only for exact round counts
@@ -763,7 +763,7 @@ end
 # minimal extra work.
 
 # packing:
-#   lsb  ab carries state msb
+#   lsb  ab2 carries6 state6 msb
 # this lets us directly carry over the result for lookup needing only a
 # shift and add for state.
 
@@ -774,16 +774,18 @@ end
 
 function set(word::Uint, bit::Int, value::Uint, len::Int)
     bit = bit - 1
-    mask::Uint = 1 << (bit+len) - 1 << bit
-    return (word & ~mask) | (value & mask) << bit
+    mask::Uint = 1 << (bit+len) - (1 << bit) 
+    return (word & ~mask) | ((value << bit) & mask)
 end
+
+const ZERO = zero(Uint)
+const ONE = one(Uint)
+const TWO = ONE+ONE
+const THREE = TWO+ONE
 
 function precalc2()
 
     const SIZE = 2^14
-    const ZERO = zero(Uint)
-    const ONE = one(Uint)
-    const THREE = ONE+ONE+ONE
 
     # cache a single round
     one_round = zeros(Uint, 2^6)
@@ -803,7 +805,7 @@ function precalc2()
                             A = A + s1 + ca
                             B = b $ A
                             B = B + s2 + cb
-                            out = (A & 0x1) | (B & 0x1) | (A & 0x2) << 1 | (B & 0x2) << 2
+                            out = (A & 0x1) | (B & 0x1) << 1 | (A & 0x2) << 1 | (B & 0x2) << 2
                             one_round[in+1] = out
                         end
                     end
@@ -825,7 +827,7 @@ function precalc2()
                     for s1 in ZERO:ONE
                         in = set(in, 9, s1)
                         A = a + s1 + c1
-                        out = set(out, 3, A >> 1)
+                        out = set(ZERO, 3, A >> 1)
                         in2 = A & 0x1
                         for s2 in ZERO:ONE
                             in = set(in, 10, s2)
@@ -833,18 +835,24 @@ function precalc2()
                             out = set(out, 4, B >> 1)
                             in2 = set(in2, 2, B)
                             for c34 in ZERO:THREE
+                                in = set(in, 5, c34, 2)
                                 in2 = set(in2, 3, c34, 2)
                                 for s34 in ZERO:THREE
+                                    in = set(in, 11, s34, 2)
                                     in2 = set(in2, 5, s34, 2)
                                     out2 = one_round[in2+1]
                                     out = set(out, 5, out2 >> 2, 2)
                                     in3 = out2 & 0x3
                                     for c56 in ZERO:THREE
+                                        in = set(in, 7, c56, 2)
                                         in3 = set(in3, 3, c56, 2)
                                         for s56 in ZERO:THREE
-                                            in2 = set(in3, 5, s56, 2)
+                                            in = set(in, 13, s56, 2)
+                                            in3 = set(in3, 5, s56, 2)
                                             out3 = one_round[in3+1]
                                             out = set(out, 7, out3 >> 2, 2)
+                                            out = set(out, 1, out3, 2)
+                                            println("t1: $in -> $out")
                                             table1[in+1] = out
                                         end
                                     end
@@ -869,7 +877,7 @@ function precalc2()
                 in = set(in, 9, s12, 2)
                 in1 = set(in1, 5, s12, 2)
                 out1 = one_round[in1+1]
-                out = set(out, 3, out1 >> 2, 2)
+                out = set(ZERO, 3, out1 >> 2, 2)
                 in2 = out1 & 0x3
                 for c34 in ZERO:THREE
                     in = set(in, 5, c34, 2)
@@ -888,6 +896,8 @@ function precalc2()
                                 in3 = set(in3, 5, s56, 2)
                                 out3 = one_round[in3+1]
                                 out = set(out, 7, out3 >> 2, 2)
+                                out = set(out, 1, out3, 2)
+                                println("t2: $in -> $out")
                                 table2[in+1] = out
                             end
                         end
@@ -900,80 +910,70 @@ function precalc2()
     table1, table2
 end
 
+function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2)
+    
+    const DEPTH::Uint = 8 * sizeof(W)
+    const WIDTH::Uint = 12  # 2*5+2
+    # search through state as a binary value from 0 to WIDTH2
+    const WIDTH2::Uint = 2^WIDTH - 1
+    # but tables require 6 bits offset 8 bits so generate and mask
+    const SMASK::Uint = ((2 ^ 6) - 1) << 8
+    const SDELTA::Uint = 1 << 8      
+    const SWIDTH2::Uint = WIDTH2 << 8
+    # mask for carries
+    const CMASK::Uint = ((2 ^ 6) - 1) << 2
 
+    function solve(e)
 
-# ignoring the initial add for a moment, the encryption is based on rounds
-# that are defined, for a single bit, by:
-# - the current a and b value
-# - carry from the previous bits (a and b, 2 per round)
-# - the state of the cipher (a and b per, 2 per round)
-# and the result is a value and a carry for a and b.
-# so in general, for N rounds we need 2 + N (2 + 2) bits of input and 
-# generate 2 + N * 2 bits of output (a, b and the carries for each round).
-
-# N        1      2     3      4
-# in       6      10    14     18
-# out      4      6     8      10
-# storage  256B   1kB   16kB   512kB
-
-# but given that we need to use 16bit for n+4 anyway, we can store all
-# results in a single table (out=16 for N=4).
-
-# packed format:
-# input   lsb  carriesx8, statex8, abx2  msb
-# output  lsb  carriesx8, resultsx8  msb
-
-function precalc()
-    const size = 2^18
-    # single round
-    tmp1 = zeros(Uint16, size)
-    for carries in convert(Uint, 0x0):convert(Uint, 0x3)
-        ac, bc = carries & 0x1, carries & 0x2 >> 1
-        for state in convert(Uint, 0x0):convert(Uint, 0x3)
-            s1, s2 = state & 0x1, state & 0x2 >> 1
-            for ab in convert(Uint, 0x0):convert(Uint, 0x3)
-                a, b = ab & 0x1, ab & 0x2 >> 1
-                a = a $ b
-                a = a + s1 + ac
-                b = b $ (a & 0x1)
-                b = b + s2 + bc
-                in = carries | state << 8 | ab << 16
-                out::Uint16 = (a & 0x2) >> 1 | (b & 0x2) | (a & 0x1) << 8 | (b & 0x1) << 9
-#                println("1 $(pad(convert(Uint32, in))) -> $(pad(out))")
-                tmp1[in+1] = out
+        known = zeros(Uint, THREE, DEPTH)
+        o::W, z::W = -1, 0
+        for ab in ONE:THREE
+            a, b = ab & 0x1 == 0x1 ? o : z, ab & 0x2 == 0x2 ? o : z
+            ap, bp = e(a, b)
+            println("$(pad(a)) => $(pad(ap))  $(pad(b)) => $(pad(bp))")
+            for level in 1:DEPTH
+                known[ab, level] = known[ab, level] | ap & 0x1 | (bp & 0x1) << 1
+                ap, bp = ap >> 1, bp >> 1
             end
         end
-    end
-    # two rounds
-    tmp2 = zeros(Uint16, size)
-    for carries in convert(Uint, 0x0):convert(Uint, 0xf)
-        for state in convert(Uint, 0x0):convert(Uint, 0xf)
-            for ab in convert(Uint, 0x0):convert(Uint, 0x3)
-                r1::Uint = tmp1[(carries & 0x3 | state & 0x3 << 8 | ab << 16)+1]
-                r2::Uint = tmp1[(carries & 0xc >> 2 | state & 0xc << 6 | r1 & 0x300 << 8)+1]
-                in = carries | state << 8 | ab << 16
-                out::Uint16 = r1 & 0x3 | r2 & 0x3 << 2 | r1 & 0x300 | r2 & 0x300 << 2
-#                println("2 $(pad(convert(Uint32, in))) -> $(pad(out))")
-                tmp2[in+1] = out
+        println(known)
+
+        carries = zeros(Uint, THREE, DEPTH+1)
+        function round(s, ab, k, c, level)
+            s1 = s & SMASK
+            s2 = (s >> 6) & SMASK
+            c1 = c & CMASK
+            c2 = (c >> 6) & CMASK
+            out1 = convert(Uint, table1[(ab | c1 | s1)+1])
+            out2 = convert(Uint, table2[((out1 & THREE) | c2 | s2)+1])
+            println("$level  $ab  $(pad(out1)) $(pad(out2))  $(out2 & THREE) $k")
+            ok = out2 & THREE == k
+            if ok
+                carries[ab, level+1] = (out1 & CMASK) | (out2 & CMASK) << 6
             end
+            ok
         end
-    end
-    # four rounds
-    cache = zeros(Uint16, size)
-    for carries in convert(Uint, 0x0):convert(Uint, 0xff)
-#        println("$(pad(convert(Uint8, carries)))/ff")
-        for state in convert(Uint, 0x0):convert(Uint, 0xff)
-            for ab in convert(Uint, 0x0):convert(Uint, 0x3)
-                r12::Uint = tmp2[(carries & 0xf | state & 0xf << 8 | ab << 16)+1]
-                r34::Uint = tmp2[(carries & 0xf0 >> 4 | state & 0xf0 << 4 | r12 & 0xc00 << 6)+1]
-                in::Uint = carries | state << 8 | ab << 16
-                out::Uint16 = r12 & 0xf | r34 & 0xf << 4 | r12 & 0xf00 | r34 & 0xf00 << 4
-#                println("4 $(pad(convert(Uint32, in))) -> $(pad(out))")
-                cache[in+1] = out
+        
+        function search(level::Int)
+            println("level $level")
+            k1, k2, k3 = known[:, level]
+            c1, c2, c3 = carries[:, level]
+            for s in ZERO:SDELTA:SWIDTH2
+                if round(s, ONE, k1, c1, level) &&
+                    round(s, TWO, k2, c2, level) &&
+                    round(s, THREE, k3, c3, level)
+                    if search(level+1)
+                        return true
+                    end
+                end
             end
+            false
         end
+
+        search(1)
+
     end
-    cache
+
 end
 
 
@@ -985,7 +985,11 @@ fake_keygen(w, r, k; rotate=true) =
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
-    cache = precalc2()
+    table1, table2 = precalc2()
+    @time key_from_encrypt(1, make_cached_dfs_noro_r5(Uint32, table1, table2),
+                     fake_keygen(Uint32, 0x5, 0x10, rotate=false),
+                     k -> (a, b) -> encrypt(k, a, b), 
+                     eq=same_ctext(1024, encrypt))
     return
     cache = precalc()
 #    @time key_from_encrypt(1, make_cached_dfs_noro(Uint32, 0x3, 32, cache),
@@ -1129,11 +1133,17 @@ function test_cache()
     assert_cache(cache, State(Uint32, 0x8, z, rotate=false))
 end
 
+function test_set()
+    @assert 0x2 == set(ZERO, 2, ONE)
+    @assert 0x6 == set(ZERO, 2, THREE, 2)
+end
+
 function tests()
     test_rotatel()
     test_vectors()
     test_8()
     test_cache()
+    test_set()
 end
 
 
