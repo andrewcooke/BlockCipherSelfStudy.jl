@@ -1,4 +1,10 @@
 
+# TODO - WTF?!
+# ffffffff => 40dea528  00000000 => e54791dc
+# 00000000 => 40dea6a7  ffffffff => e5479830
+# ffffffff => 40dea545  ffffffff => e54791eb
+
+
 module RC5
 using Blocks, Solve, Tasks, Debug, GA
 
@@ -52,7 +58,7 @@ State(w::Type{Uint64}, r::Uint8, k::Array{Uint8}; rotate=true) =
 State{w}(r, k, expand_key(r, k, P64, Q64), rotate)
 
 # create with a known state (no key)
-State{W<:Unsigned}(r::Uint8, s::Array{W}; rotate=true) = 
+State{W<:Unsigned}(r::Uint, s::Array{W}; rotate=true) = 
 State{W}(r, Uint8[], s, rotate)
 
 sprintf_state{W<:Unsigned}(s::State{W}) = join(map(pad, s.s), "")
@@ -492,7 +498,7 @@ function make_dfs_noro{W<:Unsigned}(::Type{W}, r, len)
         width::Uint, depth::Uint = 2r+2, 8*sizeof(W)
         U = uint_for_bits(width+1)  # extra bit for overflow
         U = Uint64  # faster than minimum size above (left in for error check)
-        state = State(r, zeros(W, width), rotate=false)
+        state = State(convert(Uint, r), zeros(W, width), rotate=false)
         overflow::U, inc::U, start::U = 1 << width, one(U), zero(U)
         function inner(level)
             if level > depth
@@ -715,7 +721,7 @@ function make_cached_dfs_noro{W<:Unsigned}(::Type{W}, r::Uint, len::Uint, cache)
             end
         end
         if inner(1)
-            state = State(convert(Uint8, r), zeros(W, width), rotate=false)
+            state = State(r, zeros(W, width), rotate=false)
             for i in one(Uint):depth
                 set_state!(state, rows[i], 2*state.r+2, i)
             end
@@ -782,6 +788,9 @@ const ZERO = zero(Uint)
 const ONE = one(Uint)
 const TWO = ONE+ONE
 const THREE = TWO+ONE
+const FOUR = THREE+ONE
+const SIXTEEN = FOUR*FOUR
+const FIFTEEN = SIXTEEN-ONE
 
 function precalc2()
 
@@ -852,7 +861,7 @@ function precalc2()
                                             out3 = one_round[in3+1]
                                             out = set(out, 7, out3 >> 2, 2)
                                             out = set(out, 1, out3, 2)
-                                            println("t1: $in -> $out")
+#                                            println("t1: $in -> $out")
                                             table1[in+1] = out
                                         end
                                     end
@@ -890,14 +899,14 @@ function precalc2()
                         in3 = out2 & 0x3
                         for c56 in ZERO:THREE
                             in = set(in, 7, c56, 2)
-                            in3 = set(in2, 3, c56, 2)
+                            in3 = set(in3, 3, c56, 2)
                             for s56 in ZERO:THREE
                                 in = set(in, 13, s56, 2)
                                 in3 = set(in3, 5, s56, 2)
                                 out3 = one_round[in3+1]
                                 out = set(out, 7, out3 >> 2, 2)
                                 out = set(out, 1, out3, 2)
-                                println("t2: $in -> $out")
+#                                println("t2: $in -> $out")
                                 table2[in+1] = out
                             end
                         end
@@ -925,44 +934,61 @@ function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2)
 
     function solve(e)
 
-        known = zeros(Uint, THREE, DEPTH)
+        known = zeros(Uint, SIXTEEN, DEPTH)
         o::W, z::W = -1, 0
-        for ab in ONE:THREE
-            a, b = ab & 0x1 == 0x1 ? o : z, ab & 0x2 == 0x2 ? o : z
-            ap, bp = e(a, b)
-            println("$(pad(a)) => $(pad(ap))  $(pad(b)) => $(pad(bp))")
+        for ab in ZERO:FIFTEEN
+            a, b = ab & ONE == ONE ? o : z, ab & TWO == TWO ? o : z
+            cd = (ab + (ab >> 2)) & THREE
             for level in 1:DEPTH
-                known[ab, level] = known[ab, level] | ap & 0x1 | (bp & 0x1) << 1
-                ap, bp = ap >> 1, bp >> 1
+                m = 1 << (level - 1)
+                c::W = cd & ONE == ONE ? (a | m) : (a & ~m)
+                d::W = cd & TWO == TWO ? (b | m) : (b & ~m)
+                cp, dp = e(c, d)
+ #               println("$ab  $level  $(ab&3) $(cd&3)  $(pad(c)) $(pad(d)) -> $(pad(cp)) $(pad(dp))")
+                cp, dp = cp >> (level - 1), dp >> (level - 1)
+                known[ab+1, level] = (cp & ONE) | (dp & ONE) << 1
             end
         end
-        println(known)
 
-        carries = zeros(Uint, THREE, DEPTH+1)
-        function round(s, ab, k, c, level)
-            s1 = s & SMASK
-            s2 = (s >> 6) & SMASK
+        carries = zeros(Uint, FOUR, DEPTH+1)
+        function check(s, s1, s2, ab, level)
+            k = known[ab+1, level]
+            c = carries[(ab & THREE)+1, level]
+            cd = (ab + (ab >> 2)) & THREE
             c1 = c & CMASK
             c2 = (c >> 6) & CMASK
-            out1 = convert(Uint, table1[(ab | c1 | s1)+1])
+            out1 = convert(Uint, table1[(cd | c1 | s1)+1])
             out2 = convert(Uint, table2[((out1 & THREE) | c2 | s2)+1])
-            println("$level  $ab  $(pad(out1)) $(pad(out2))  $(out2 & THREE) $k")
             ok = out2 & THREE == k
-            if ok
-                carries[ab, level+1] = (out1 & CMASK) | (out2 & CMASK) << 6
+            if ok && ab < FOUR
+                carries[ab+1, level+1] = (out1 & CMASK) | (out2 & CMASK) << 6
             end
+#            println("$level  $(s >> 8)  $cd  $(out2 & THREE) $k $ok")
             ok
         end
-        
-        function search(level::Int)
-            println("level $level")
-            k1, k2, k3 = known[:, level]
-            c1, c2, c3 = carries[:, level]
+      
+        delay::Uint = ZERO
+        const REPORT = convert(Uint, 2^10)
+#        const REPORT = ONE
+
+        function search(level::Int, path)
+            delay = delay + ONE
+            if delay == REPORT
+                println("level $level $path")
+                delay = ZERO
+            end
             for s in ZERO:SDELTA:SWIDTH2
-                if round(s, ONE, k1, c1, level) &&
-                    round(s, TWO, k2, c2, level) &&
-                    round(s, THREE, k3, c3, level)
-                    if search(level+1)
+                s1 = s & SMASK
+                s2 = (s >> 6) & SMASK
+                ab = ZERO
+                while ab < SIXTEEN && check(s, s1, s2, ab, level)
+                    ab += ONE
+                end
+                if ab == SIXTEEN
+                    if level == DEPTH
+                        return true
+                    end
+                    if search(level+1, "$path $(s >> 8)")
                         return true
                     end
                 end
@@ -970,7 +996,7 @@ function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2)
             false
         end
 
-        search(1)
+        search(1, "")
 
     end
 
@@ -1138,16 +1164,56 @@ function test_set()
     @assert 0x6 == set(ZERO, 2, THREE, 2)
 end
 
+function test_table1(table1)
+    for ab in ZERO:THREE
+        state = State(convert(Uint, 0x2), zeros(Uint8, 6), rotate=false)
+        for s in ZERO:convert(Uint, 0x3f)
+            set_state!(state, convert(Uint8, s), convert(Uint, 6), ONE)
+            a, b = encrypt(state, convert(Uint8, ab & 0x1), convert(Uint8, ab & 0x2 >> 1))
+            cd = table1[(ab | s << 8)+1]
+            @assert cd & 0x3 == (a & 0x1) | (b & 0x1 << 1)
+        end
+    end
+end
+
+function test_table2(table1, table2)
+    m = 0x3f00
+    for ab in ZERO:THREE
+        state = State(convert(Uint, 0x5), zeros(Uint8, 12), rotate=false)
+        for s in ZERO:convert(Uint, 0xfff)
+            set_state!(state, convert(Uint16, s), convert(Uint, 12), ONE)
+            a, b = encrypt(state, convert(Uint8, ab & 0x1), convert(Uint8, ab & 0x2 >> 1))
+            out1 = table1[(ab | (m & (s << 8)))+1]
+            cd = table2[((out1 & 0x3) | (m & (s << 2)))+1]
+#            println("$(pad(s)) $cd $(a & 0x1 | (b & 0x1 << 1))")
+            @assert cd & 0x3 == (a & 0x1) | (b & 0x1 << 1)
+        end
+    end
+end
+
+function test_cached_dfs_r5(table1, table2)
+    state = State(convert(Uint, 0x5), collect(Uint32, take(12, rands(Uint32))), rotate=false)
+#    state = State(convert(Uint, 0x5), zeros(Uint32, 12), rotate=false)
+#    state.s[12] = convert(Uint32, -1)
+    solve = make_cached_dfs_noro_r5(Uint32, table1, table2)
+    solve((a, b) -> encrypt(state, a, b))
+    @time solve((a, b) -> encrypt(state, a, b))
+end
+
 function tests()
     test_rotatel()
     test_vectors()
     test_8()
     test_cache()
     test_set()
+    table1, table2 = precalc2()
+    test_table1(table1)
+    test_table2(table1, table2)
+    test_cached_dfs_r5(table1, table2)
 end
 
 
 tests()
-solutions()
+#solutions()
 
 end
