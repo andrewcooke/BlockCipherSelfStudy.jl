@@ -1,13 +1,18 @@
 
 module Blocks
-export pack, unpack, group, pad, produce_from
+export pack, unpack, group, ungroup, pad, produce_from
 
-function pack{W<:Unsigned}(::Type{W}, bytes)
+function pack{W<:Unsigned}(::Type{W}, bytes; little=true)
+    # this is little-endian by default
     block::W = 0x0
     i = 0
     Task() do
         for b::W in bytes
-            block = block | b << 8i
+            if little
+                block = block | b << 8 * i
+            else
+                block = block << 8 | b
+            end
             i = i + 1
             if i == sizeof(W)
                 produce(block)
@@ -18,12 +23,16 @@ function pack{W<:Unsigned}(::Type{W}, bytes)
     end
 end
 
-function unpack{W<:Unsigned}(::Type{W}, blocks)
+function unpack{W<:Unsigned}(::Type{W}, blocks; little=true)
     Task() do
         for block in blocks
             for i in 1:sizeof(W)
-                produce(convert(Uint8, block & 0xff))
-                block = block >> 8
+                if little
+                    produce(convert(Uint8, block & 0xff))
+                    block = block >> 8
+                else
+                    produce(convert(Uint8, (block >> 8 * (sizeof(W) - i)) & 0xff))
+                end
             end
         end
     end
@@ -46,12 +55,18 @@ function group(n, seq)
     end
 end
 
-function pad{W<:Unsigned}(n::W)
-    s = @sprintf("%x", n)
-    while length(s) < 2 * sizeof(W)
-        s = "0$s"
+function ungroup(seq)
+    Task() do
+        for subseq in seq
+            for value in subseq
+                produce(value)
+            end
+        end
     end
-    s
+end
+
+function pad{W<:Unsigned}(n::W)
+    hex(n, 2 * sizeof(W))
 end
 
 function produce_from(seq)
@@ -64,6 +79,10 @@ end
 function test_pack()
     b = collect(unpack(Uint32, pack(Uint32, b"123456789")))
     @assert b == b"12345678" b
+    b = collect(unpack(Uint32, pack(Uint32, b"123456789", little=false), little=false))
+    @assert b == b"12345678" b
+    @assert 0x1234 == consume(pack(Uint16, hex2bytes("3412")))
+    @assert 0x1234 == consume(pack(Uint16, hex2bytes("1234"), little=false))
 end
 
 function tests()

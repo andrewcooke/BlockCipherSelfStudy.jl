@@ -39,6 +39,10 @@ function same_ctext(n, encrypt)
         p = collect(Uint8, take(n, rands(Uint8)))
         c1 = collect(Uint8, encrypt(k1, p))
         c2 = collect(Uint8, encrypt(k2, p))
+        if c1 != c2
+            println(bytes2hex(c1))
+            println(bytes2hex(c2))
+        end
         c1 == c2
     end
 end
