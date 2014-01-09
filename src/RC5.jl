@@ -947,8 +947,8 @@ function spirals{W<:Unsigned}(::Type{W})
     end
 end
 
+const ALL_ONES::W, ALL_ZEROS::W = -1, 0
 function constants{W<:Unsigned}(::Type{W})
-    const ALL_ONES::W, ALL_ZEROS::W = -1, 0
     Task() do
         for ab in ZERO:THREE
             produce(ab & ONE == ONE ? ALL_ONES : ALL_ZEROS,
@@ -990,21 +990,21 @@ function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2)
                 end
             end
         end
-        const ALL_ONES::W, ALL_ZEROS::W = -1, 0
         
-        for ab in ZERO:FIFTEEN
-            a = ab & ONE == ONE ? ALL_ONES : ALL_ZEROS
-            b = ab & TWO == TWO ? ALL_ONES : ALL_ZEROS
-            cd = (ab + (ab >> 2)) & THREE
-            for level in 1:DEPTH
-                m = 1 << (level - 1)
-                c::W = cd & ONE == ONE ? (a | m) : (a & ~m)
-                d::W = cd & TWO == TWO ? (b | m) : (b & ~m)
-                cp, dp = e(c, d)
-                cp, dp = cp >> (level - 1), dp >> (level - 1)
-                known[ab+ONE, 1, level] = (cp & ONE) | (dp & ONE) << 1
+        for cd in ZERO:THREE
+            for (ab, (a, b)) in enumerate(constants())
+                pq = (ab + cd) & THREE
+                for level in 1:DEPTH
+                    m = 1 << (level - 1)
+                    p::W = pq & ONE == ONE ? (a | m) : (a & ~m)
+                    q::W = pq & TWO == TWO ? (b | m) : (b & ~m)
+                    pp, qp = e(p, q)
+                    pp, qp = pp >> (level - 1), qp >> (level - 1)
+                    known[ab+(cd << 2), 1, level] = (pp & ONE) | (qp & ONE) << 1
+                end
             end
         end
+
         sp = spirals(W)
         for ab in ZERO:THREE
             a = sp[ab+ONE, 1]
