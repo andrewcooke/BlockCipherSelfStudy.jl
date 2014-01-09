@@ -934,15 +934,27 @@ function spirals{W<:Unsigned}(::Type{W})
     # the idea here is to have each level have a different bit pattern,
     # to complement the basic test with a constant pattern.  however,
     # the results repeat every 8 bits.
-    sp = zeros(W, 4, 2)
-    for level in 1:8*sizeof(W)
-        for ab in 0:3
-            cd = (ab + level) & THREE
-            sp[ab+ONE, 1] = sp[ab+ONE, 1] | (cd & ONE) << (level - 1)
-            sp[ab+ONE, 2] = sp[ab+ONE, 2] | ((cd & TWO) >> 1) << (level - 1)
+    Task() do 
+        for ab in ZERO:THREE
+            ap, bp = zero(W), zero(W)
+            for level in ONE:convert(Uint, 8*sizeof(W))
+                cd = (ab + level) & THREE
+                ap = ap | convert(W, (cd & ONE) << (level - 1))
+                bp = bp | convert(W, ((cd & TWO) >> 1) << (level - 1))
+            end
+            produce(ap, bp)
         end
     end
-    sp
+end
+
+function constants{W<:Unsigned}(::Type{W})
+    const ALL_ONES::W, ALL_ZEROS::W = -1, 0
+    Task() do
+        for ab in ZERO:THREE
+            produce(ab & ONE == ONE ? ALL_ONES : ALL_ZEROS,
+                    ab & TWO == TWO ? ALL_ONES : ALL_ZEROS)
+        end
+    end
 end
 
 function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2)
@@ -967,9 +979,19 @@ function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2)
     function solve(e)
 
         # generate target values for the tests that run every step
-        # (constant 0 or 1 and the spirals)
+        # (constant 0 or 1, the spirals, and random)
         known = zeros(Uint, SIXTEEN, 3, DEPTH)
+        function set_known(source, pattern)
+            for (i, (a, b)) in enumerate(source)
+                ap, bp = e(a, b)
+                for level in 1:DEPTH
+                    known[i, pattern, level] = (ap & ONE) | (bp & ONE) << 1
+                    ap, bp = ap >> 1, bp >> 1
+                end
+            end
+        end
         const ALL_ONES::W, ALL_ZEROS::W = -1, 0
+        
         for ab in ZERO:FIFTEEN
             a = ab & ONE == ONE ? ALL_ONES : ALL_ZEROS
             b = ab & TWO == TWO ? ALL_ONES : ALL_ZEROS
@@ -995,8 +1017,6 @@ function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2)
             end
         end
 
-        function random
-        
         carries = zeros(Uint, 4, 2, 3, DEPTH+1)
 
         function check(s1::Uint, s2::Uint, level::Uint)
@@ -1311,9 +1331,7 @@ function test_chars()
         ap2, bp2 = encrypt(s2, a, b)
         println("$(pad(a)) $(pad(b))  $(pad(ap1)) $(pad(bp1))  $(pad(ap2)) $(pad(bp2))")
     end
-    sp = spirals(Uint32)
-    for i in ONE:FOUR
-        (a, b) = sp[i, :]
+    for (a, b) in spirals(Uint32)
         ap1, bp1 = encrypt(s1, a, b)
         ap2, bp2 = encrypt(s2, a, b)
         println("$(pad(a)) $(pad(b))  $(pad(ap1)) $(pad(bp1))  $(pad(ap2)) $(pad(bp2))")
