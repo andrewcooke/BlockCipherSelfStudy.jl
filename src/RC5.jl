@@ -947,8 +947,8 @@ function spirals{W<:Unsigned}(::Type{W})
     end
 end
 
-const ALL_ONES::W, ALL_ZEROS::W = -1, 0
 function constants{W<:Unsigned}(::Type{W})
+    const ALL_ONES::W, ALL_ZEROS::W = -1, 0
     Task() do
         for ab in ZERO:THREE
             produce(ab & ONE == ONE ? ALL_ONES : ALL_ZEROS,
@@ -992,7 +992,8 @@ function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2)
         end
         
         for cd in ZERO:THREE
-            for (ab, (a, b)) in enumerate(constants())
+            for (ab, (a, b)) in enumerate(constants(W))
+                ab -= 1  # zero indexed
                 pq = (ab + cd) & THREE
                 for level in 1:DEPTH
                     m = 1 << (level - 1)
@@ -1000,19 +1001,16 @@ function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2)
                     q::W = pq & TWO == TWO ? (b | m) : (b & ~m)
                     pp, qp = e(p, q)
                     pp, qp = pp >> (level - 1), qp >> (level - 1)
-                    known[ab+(cd << 2), 1, level] = (pp & ONE) | (qp & ONE) << 1
+                    known[ab+(cd << 2)+1, 1, level] = (pp & ONE) | (qp & ONE) << 1
                 end
             end
         end
 
-        sp = spirals(W)
-        for ab in ZERO:THREE
-            a = sp[ab+ONE, 1]
-            b = sp[ab+ONE, 2]
+        for (i, (a, b)) in enumerate(spirals(W))
             ap, bp = e(a, b)
             for level in 1:DEPTH
 #                println("$ab  $level  $(ab & 3)  $(pad(a)) $(pad(b)) -> $(pad(ap)) $(pad(bp))")
-                known[ab+ONE, 2, level] = (ap & ONE) | (bp & ONE) << 1
+                known[i, 2, level] = (ap & ONE) | (bp & ONE) << 1
                 ap, bp = ap >> 1, bp >> 1
             end
         end
@@ -1291,11 +1289,11 @@ function test_table2(table1, table2)
 end
 
 function test_cached_dfs_r5(table1, table2)
-    s = State(FIVE, collect(Uint32, take(12, rands(Uint32))), rotate=false)
-#    s = State(FIVE, zeros(Uint32, 12), rotate=false)
-#    s.s[1] = convert(Uint32, -1)
+#    s = State(FIVE, collect(Uint32, take(12, rands(Uint32))), rotate=false)
+    s = State(FIVE, zeros(Uint32, 12), rotate=false)
+    s.s[1] = convert(Uint32, -1)
 #    s.s[2] = 0x55555555
-#    s.s[3] = convert(Uint32, -1)
+    s.s[3] = convert(Uint32, -1)
     solve = make_cached_dfs_noro_r5(Uint32, table1, table2)
     s1 = solve((a, b) -> encrypt(s, a, b))
     println("$s\n$s1")
@@ -1347,7 +1345,7 @@ function tests()
     table1, table2 = precalc2()
     test_table1(table1)
     test_table2(table1, table2)
-#    test_cached_dfs_r5(table1, table2)
+    test_cached_dfs_r5(table1, table2)
     test_chars()
 end
 
