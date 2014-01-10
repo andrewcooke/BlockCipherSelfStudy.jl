@@ -58,7 +58,7 @@ State(w::Type{Uint64}, r::Uint8, k::Array{Uint8}; rotate=true) =
 State{w}(r, k, expand_key(r, k, P64, Q64), rotate)
 
 function parse_state{W<:Unsigned}(::Type{W}, s)
-    if contains(s, ',')
+    if in(',', s)
         map(x -> parseint(W, x, 16), split(s, ','))
     else
         # old format was without commas
@@ -489,7 +489,7 @@ function test_bits{W<:Unsigned}(ptext::Vector{(W,W)}, ctext::Vector{(W,W)}, stat
     true
 end
 
-function set_state!{W<:Unsigned, U<:Unsigned}(state::State{W}, row::U, level::Uint)
+function set_state!{W<:Unsigned, U<:Unsigned}(state::State{W}, row::U, level::Integer)
     bit::W, lsb::U, unset, width = one(W) << (level-1), one(U), zero(U), 2*state.r + 2
     for i in 1:width
         if row & lsb == unset
@@ -783,15 +783,19 @@ end
 # this lets us directly carry over the result for lookup needing only a
 # shift and add for state.
 
-function set(word::Uint, bit::Int, value::Uint)
-    mask::Uint = 1 << (bit - 1)
-    return (word & ~mask) | (value & 0x1) << (bit - 1)
+function set{W<:Unsigned}(word::W, bit::Int, value::Uint)
+    mask::W = 1 << (bit - 1)
+    return (word & ~mask) | (value & one(W)) << (bit - 1)
 end
 
-function set(word::Uint, bit::Int, value::Uint, len::Int)
+function set{W<:Unsigned}(word::W, bit::Int, value::W, len::Int)
     bit = bit - 1
-    mask::Uint = 1 << (bit+len) - (1 << bit) 
+    mask::W = one(W) << (bit+len) - (one(W) << bit) 
     return (word & ~mask) | ((value << bit) & mask)
+end
+
+function get{W<:Unsigned}(word::W, bit::Int)
+    return (word >> (bit - 1)) & one(W)
 end
 
 const ZERO = zero(Uint)
@@ -957,107 +961,65 @@ function constants{W<:Unsigned}(::Type{W})
     end
 end
 
-function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2)
+function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2;
+                                              initial=4, attempts=100, decay=0.1, period=1000)
     
-    const DEPTH::Uint = 8 * sizeof(W)
-    const WIDTH::Uint = 12  # 2*5+2
-    # search through state as a binary value from 0 to WIDTH2
-    const WIDTH2::Uint = 2^WIDTH - 1
-    # but tables require 6 bits offset 8 bits so generate and mask
+    const DEPTH::Int = 8 * sizeof(W)
+    const WIDTH::Uint = 2 * 5 + 2
+    # tables of state require 6 bits offset 8 bits so generate and mask
     const SMASK::Uint = ((2 ^ 6) - 1) << 8
     const SDELTA::Uint = 1 << 8      
-    const SWIDTH2::Uint = WIDTH2 << 8
-    # mask for carries
+    # similar mask for carries
     const CMASK::Uint = ((2 ^ 6) - 1) << 2
 
-    # memory budget:
-    # each lookup table, 2^14 = 16 kB x 2 = 32 kB
-    # known values, 16x3x24x8 = 9 kb (for 32bit W)
-    # carries, 4x2x3x25x8 = 5 kB (for 32bit W)
-    # total 30kB (available, including code, 64kB)
+    # memory budget (L1 is 64 kB):
+    #  lookup tables, 2^14*2 = 16 kB * 2 = 32 kB
+    #  known/carries, 2*DEPTH*N = 2*32*12 = 768 B
+    #  score, N*8 = 76*12 = 912 B
+    #  path, DEPTH*2*8 = 512 B
+    #  state - not used til success
 
     function solve(e)
 
-        # generate target values for the tests that run every step
-        # (constant 0 or 1, the spirals, and random)
-        known = zeros(Uint, SIXTEEN, 3, DEPTH)
-        function set_known(source, pattern)
-            for (i, (a, b)) in enumerate(source)
-                ap, bp = e(a, b)
-                for level in 1:DEPTH
-                    known[i, pattern, level] = (ap & ONE) | (bp & ONE) << 1
-                    ap, bp = ap >> 1, bp >> 1
-                end
-            end
-        end
-        
-        for cd in ZERO:THREE
-            for (ab, (a, b)) in enumerate(constants(W))
-                ab -= 1  # zero indexed
-                pq = (ab + cd) & THREE
-                for level in 1:DEPTH
-                    m = 1 << (level - 1)
-                    p::W = pq & ONE == ONE ? (a | m) : (a & ~m)
-                    q::W = pq & TWO == TWO ? (b | m) : (b & ~m)
-                    pp, qp = e(p, q)
-                    pp, qp = pp >> (level - 1), qp >> (level - 1)
-                    known[ab+(cd << 2)+1, 1, level] = (pp & ONE) | (qp & ONE) << 1
-                end
-            end
-        end
+        const N::Int = initial + 8
+        known = zeros(Uint8, 2, DEPTH, N)
+        const score::Vector{Int} = zeros(Int, N)
 
-        for (i, (a, b)) in enumerate(spirals(W))
-            ap, bp = e(a, b)
+         function set_known(a, b, ap, bp, i)
             for level in 1:DEPTH
-#                println("$ab  $level  $(ab & 3)  $(pad(a)) $(pad(b)) -> $(pad(ap)) $(pad(bp))")
-                known[i, 2, level] = (ap & ONE) | (bp & ONE) << 1
-                ap, bp = ap >> 1, bp >> 1
+                known[1, level, i] = bits(a, b)
+                known[2, level, i] = bits(ap, bp)
+                a, b, ap, bp = a >> 1, b >> 1, ap >> 1, bp >> 1
             end
         end
 
-        carries = zeros(Uint, 4, 2, 3, DEPTH+1)
-
-        function check(s1::Uint, s2::Uint, level::Uint)
-            for pattern in ONE:TWO
-                for ab in ZERO:THREE
-                    c1 = carries[ab+ONE, 1, pattern, level]
-                    c2 = carries[ab+ONE, 2, pattern, level]
-                    k = known[ab+ONE, pattern, level]
-                    in = pattern == ONE ? ab : (ab + level) & THREE
-                    out1 = convert(Uint, table1[(in | c1 | s1)+ONE])
-                    out2 = convert(Uint, table2[((out1 & THREE) | c2 | s2)+ONE])
-#                    println("ab $level/$pattern  $(s1 >> 8)  $ab  $(out2 & THREE == k)")
-#                    println("$in + $(pad(convert(Uint8, c1 >> 2))),$(pad(convert(Uint8, c2 >> 2))) -> $(out2 & THREE) + $(pad(convert(Uint8, (out1 & CMASK) >> 2))),$(pad(convert(Uint8, (out2 & CMASK) >> 2)))")
-                    if out2 & THREE == k
-                        carries[ab+ONE, 1, pattern, level+ONE] = out1 & CMASK
-                        carries[ab+ONE, 2, pattern, level+ONE] = out2 & CMASK
-                    else
-                        return false
-                    end
+         function evaluate(s1::Uint, s2::Uint, level::Int, pattern::Int)
+            in1::Uint = convert(Uint, known[1, level, pattern]) | s1
+            out1::Uint = convert(Uint, table1[in1+ONE])
+            k = convert(Uint, known[2, level, pattern])
+            in2::Uint = (out1 & THREE) | (k & CMASK) | s2
+            out2::Uint = convert(Uint, table2[in2+ONE])
+            if out2 & THREE == k & THREE
+                if level < DEPTH
+                    known[1, level+1, pattern] = (known[1, level+1, pattern] & ~CMASK) | (out1 & CMASK)
+                    known[2, level+1, pattern] = (known[2, level+1, pattern] & ~CMASK) | (out2 & CMASK)
                 end
+                true
+            else
+#                println("$level  $(s1 >> 8) $(s2 >> 8)  failed on $pattern")
+                false
             end
-
-            for cd in FOUR:FIFTEEN
-                ab = cd & THREE
-                c1 = carries[ab+ONE, 1, 1, level]
-                c2 = carries[ab+ONE, 2, 1, level]
-                k = known[cd+ONE, 1, level]
-                in = (ab + (cd >> 2)) & THREE
-                out1 = convert(Uint, table1[(in | c1 | s1)+ONE])
-                out2 = convert(Uint, table2[((out1 & THREE) | c2 | s2)+ONE])
-#                println("cd $level  $(s1 >> 8)  $cd $ab  $(out2 & THREE == k)")
-                if out2 & THREE != k
-                    return false
-                end
-            end
-            true
         end
-      
-        delay::Uint = ZERO
-        const REPORT = convert(Uint, 2^10)
-#        const REPORT = ONE
 
-        path = zeros(Uint, DEPTH*2)
+         # set initial known values (no carries)
+        bits(a::W, b::W) = convert(Uint8, (a & one(W)) | (b & one(W) << 1))
+        for (i, (a, b)) in enumerate(chain(constants(W), spirals(W), 
+                                           group(2, take(2*initial, rands(W)))))
+            ap, bp = e(a, b)
+            set_known(a, b, ap, bp, i)
+        end
+
+        const path::Vector{Uint} = zeros(Uint, DEPTH*2)
         function fmt_path(level)
             p = ""
             for i in 1:2*(level-1)
@@ -1065,36 +1027,98 @@ function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2)
             end
             p
         end
-
-        state = State(FIVE, zeros(W, WIDTH), rotate=false)
-        function search(level)
-            delay = delay + ONE
-            if delay == REPORT
-                println("level $level $(fmt_path(level))")
-                delay = ZERO
+        function extract(ab, p, pattern)
+            val::W = zero(W)
+            for level in 1:DEPTH
+                val = val << 1
+                val = val | (known[p, level, pattern] >> (ab - 1)) & 0x1
             end
+            val
+        end
+        function print_pattern(pattern)
+            a, b = extract(1, 1, pattern), extract(2, 1, pattern)
+            println("$(pad(a)) $(pad(b))  $(score[pattern])")
+        end
+        function print_filter()
+            for pattern in 1:N
+                print_pattern(pattern)
+            end
+        end
+        function update_filter(level::Int)
+            # returns the level to which we need to backtrack
+            perm = sortperm(score, rev=true, alg=InsertionSort)
+            known, score = known[:, :, perm], score[perm]
+            print_filter()
+            for i = 1:N-1
+                score[i] = convert(Int, floor(score[i] * decay))
+            end
+            for j in 1:attempts
+                a, b = rand(W), rand(W)
+                ap, bp = e(a, b)
+                set_known(a, b, ap, bp, N)
+                score[N] = 0
+                for (l, (s2, s1)) in enumerate(take(level-1, group(2, path)))
+                    if ! evaluate(s1, s2, l, N)
+                        score[N] += 1
+                        return l
+                    end
+                end
+            end
+            print_pattern(N)
+            level
+        end
+
+        function check(s1::Uint, s2::Uint, level::Int)
+            for i in 1:N
+                if ! evaluate(s1, s2, level, i)
+                    score[i] += 1
+                    return false
+                end
+            end
+            true
+        end
+
+        counter::Uint = ZERO
+        const state::State{W} = State(FIVE, zeros(W, WIDTH), rotate=false)
+        function search(level::Int)
+            # returns the level to which we must backtrack, or 0 on success
+            counter = counter + ONE
+            if counter == period || level > DEPTH
+                println("$level $(fmt_path(level))")
+                counter = ZERO
+                backtrack = update_filter(level)
+                if backtrack < level
+                    return backtrack
+                elseif level > DEPTH
+                    return 0
+                end
+            end
+            # if we are not backtracking, search next level
             for s2 in ZERO:SDELTA:SMASK
                 path[TWO*level-ONE] = s2
                 for s1 in ZERO:SDELTA:SMASK
+                    # do we encrypt correctly?
                     if check(s1, s2, level)
-                        if level == DEPTH
+                        path[TWO*level] = s1
+                        backtrack = search(level+1)
+                        if backtrack == 0
                             set_state!(state, (s1 >> 8) | (s2 >> 2), level)
-                            return true
-                        else
-                            path[TWO*level] = s1
-                            if search(level+ONE)
-                                set_state!(state, (s1 >> 8) | (s2 >> 2), level)
-                                return true
-                            end
+                        end
+                        if backtrack < level
+                            return backtrack
                         end
                     end
                 end
             end
-            false
+            # should return level-1 but (1) it saves a subtraction and
+            # (2) it indicates failure to converge at top level
+            return level
         end
-
-        search(ONE)
-        state
+        if 0 == search(1)
+            state
+        else
+            error("no solution")
+        end
     end
 
 end
@@ -1289,16 +1313,16 @@ function test_table2(table1, table2)
 end
 
 function test_cached_dfs_r5(table1, table2)
-#    s = State(FIVE, collect(Uint32, take(12, rands(Uint32))), rotate=false)
-    s = State(FIVE, zeros(Uint32, 12), rotate=false)
-    s.s[1] = convert(Uint32, -1)
+    s = State(FIVE, collect(Uint32, take(12, rands(Uint32))), rotate=false)
+#    s = State(FIVE, zeros(Uint32, 12), rotate=false)
+#    s.s[1] = convert(Uint32, -1)
 #    s.s[2] = 0x55555555
-    s.s[3] = convert(Uint32, -1)
+#    s.s[3] = convert(Uint32, -1)
     solve = make_cached_dfs_noro_r5(Uint32, table1, table2)
     s1 = solve((a, b) -> encrypt(s, a, b))
-    println("$s\n$s1")
+    println("\n$s\n$s1\n")
     @assert same_ctext(100, encrypt)(s, s1)
-    @time solve((a, b) -> encrypt(s, a, b))
+#    solve((a, b) -> encrypt(s, a, b))
 end
 
 function test_chars()

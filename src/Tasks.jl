@@ -1,6 +1,6 @@
 
 module Tasks
-export take, repeat, constant, counter
+export take, repeat, constant, counter, chain
 
 function take(n, source)
     Task() do
@@ -28,6 +28,16 @@ function counter(start=0)
         save = start
         start = start + 0x1
         save
+    end
+end
+
+function chain(tasks...)
+    Task() do
+        for task in tasks
+            for value in task
+                produce(value)
+            end
+        end
     end
 end
 

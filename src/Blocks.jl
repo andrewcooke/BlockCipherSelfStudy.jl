@@ -1,5 +1,6 @@
 
 module Blocks
+using Tasks
 export pack, unpack, group, ungroup, pad, produce_from
 
 function pack{W<:Unsigned}(::Type{W}, bytes; little=true)
@@ -55,15 +56,7 @@ function group(n, seq)
     end
 end
 
-function ungroup(seq)
-    Task() do
-        for subseq in seq
-            for value in subseq
-                produce(value)
-            end
-        end
-    end
-end
+ungroup = chain
 
 function pad{W<:Unsigned}(n::W)
     hex(n, 2 * sizeof(W))
