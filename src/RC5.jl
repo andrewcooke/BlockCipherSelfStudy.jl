@@ -243,12 +243,12 @@ function make_solve_r1_noro{W<:Unsigned}(::Type{W})
 		    i = i+1
 		end
 		if ok
-                   # pack final state
-                   s = State(0x1, W[s1, s2, s3, s4], rotate=false)
-		   println("result $s")
-                   return s
+                    # pack final state
+                    s = State(ONE, W[s1, s2, s3, s4], rotate=false)
+		    println("result $s")
+                    return s
 		else
-		   println("bad check")
+		    println("bad check")
                 end
             end
         end
@@ -539,7 +539,7 @@ end
 
 # ---- show how different parts of the state affect output
 
-function show_state{W<:Unsigned}(::Type{W}, r; rotate=true)
+function show_state{W<:Unsigned}(::Type{W}, r::Uint; rotate=true)
     state = State(r, zeros(W, sizeof(W) * (2r+2)), rotate=rotate)
     z = zero(W)
     a, b = encrypt(state, z, z)
@@ -553,191 +553,6 @@ function show_state{W<:Unsigned}(::Type{W}, r; rotate=true)
     for bit in [1,2,3,4,5,6,7,8]
         for round in 1:(2r+2)
             print_bit(state, bit, round)
-        end
-    end
-end
-
-
-# ---- dfs for state using pre-calculated cache
-
-# ignoring the initial add for a moment, the encryption is based on rounds
-# that are defined, for a single bit, by:
-# - the current a and b value
-# - carry from the previous bits (a and b, 2 per round)
-# - the state of the cipher (a and b per, 2 per round)
-# and the result is a value and a carry for a and b.
-# so in general, for N rounds we need 2 + N (2 + 2) bits of input and 
-# generate 2 + N * 2 bits of output (a, b and the carries for each round).
-
-# N        1      2     3      4
-# in       6      10    14     18
-# out      4      6     8      10
-# storage  256B   1kB   16kB   512kB
-
-# but given that we need to use 16bit for n+4 anyway, we can store all
-# results in a single table (out=16 for N=4).
-
-# packed format:
-# input   lsb  carriesx8, statex8, abx2  msb
-# output  lsb  carriesx8, resultsx8  msb
-
-function precalc()
-    const size = 2^18
-    # single round
-    tmp1 = zeros(Uint16, size)
-    for carries in convert(Uint, 0x0):convert(Uint, 0x3)
-        ac, bc = carries & 0x1, carries & 0x2 >> 1
-        for state in convert(Uint, 0x0):convert(Uint, 0x3)
-            s1, s2 = state & 0x1, state & 0x2 >> 1
-            for ab in convert(Uint, 0x0):convert(Uint, 0x3)
-                a, b = ab & 0x1, ab & 0x2 >> 1
-                a = a $ b
-                a = a + s1 + ac
-                b = b $ (a & 0x1)
-                b = b + s2 + bc
-                in = carries | state << 8 | ab << 16
-                out::Uint16 = (a & 0x2) >> 1 | (b & 0x2) | (a & 0x1) << 8 | (b & 0x1) << 9
-#                println("1 $(pad(convert(Uint32, in))) -> $(pad(out))")
-                tmp1[in+1] = out
-            end
-        end
-    end
-    # two rounds
-    tmp2 = zeros(Uint16, size)
-    for carries in convert(Uint, 0x0):convert(Uint, 0xf)
-        for state in convert(Uint, 0x0):convert(Uint, 0xf)
-            for ab in convert(Uint, 0x0):convert(Uint, 0x3)
-                r1::Uint = tmp1[(carries & 0x3 | state & 0x3 << 8 | ab << 16)+1]
-                r2::Uint = tmp1[(carries & 0xc >> 2 | state & 0xc << 6 | r1 & 0x300 << 8)+1]
-                in = carries | state << 8 | ab << 16
-                out::Uint16 = r1 & 0x3 | r2 & 0x3 << 2 | r1 & 0x300 | r2 & 0x300 << 2
-#                println("2 $(pad(convert(Uint32, in))) -> $(pad(out))")
-                tmp2[in+1] = out
-            end
-        end
-    end
-    # four rounds
-    cache = zeros(Uint16, size)
-    for carries in convert(Uint, 0x0):convert(Uint, 0xff)
-#        println("$(pad(convert(Uint8, carries)))/ff")
-        for state in convert(Uint, 0x0):convert(Uint, 0xff)
-            for ab in convert(Uint, 0x0):convert(Uint, 0x3)
-                r12::Uint = tmp2[(carries & 0xf | state & 0xf << 8 | ab << 16)+1]
-                r34::Uint = tmp2[(carries & 0xf0 >> 4 | state & 0xf0 << 4 | r12 & 0xc00 << 6)+1]
-                in::Uint = carries | state << 8 | ab << 16
-                out::Uint16 = r12 & 0xf | r34 & 0xf << 4 | r12 & 0xf00 | r34 & 0xf00 << 4
-#                println("4 $(pad(convert(Uint32, in))) -> $(pad(out))")
-                cache[in+1] = out
-            end
-        end
-    end
-    cache
-end
-
-function encrypt_bit(cache, r::Uint, a::Uint, b::Uint, state_in::Uint, offset::Uint, carries_in::Uint, carries_out::Uint)
-#    println("round $offset/$r  $a $b  $(pad(state_in)) $(pad(carries_in)) $(pad(carries_out))")
-    n = min(4, r - offset)
-    if n == 0
-        return a, b, carries_out
-    else
-        in::Uint = carries_in & 0xff | state_in & 0xff << 8 | a & 0x01 << 16 | b & 0x01 << 17
-        out::Uint = cache[in+1]
-#        println("$(pad(in)) -> $(pad(out))")
-        a = (out >> (6 + 2n)) & 0x1
-        b = (out >> (7 + 2n)) & 0x1
-        state_in = state_in >> 2n
-        carries_in = carries_in >> 2n
-        carries_out = carries_out | (out & ((1 << 2n) - 1)) << 2*offset
-        return encrypt_bit(cache, r, a, b, state_in, offset+n, carries_in, carries_out)
-    end
-end
-
-function encrypt_bit(cache, r::Uint, a::Uint, b::Uint, state::Uint, carries::Uint)
-    # the cache doesn't include the first two additions
-    a::Uint = a + (state & 0x1) + (carries & 0x1)
-    b::Uint = b + (state & 0x2 >> 1) + (carries & 0x2 >> 1)
-    ap, bp, carries_out = encrypt_bit(cache, r, a & 0x1, b & 0x1, state >> 2, zero(Uint), carries >> 2, zero(Uint))
-    ap, bp, (a & 0x2 >> 1) | (b & 0x2) | (carries_out << 2)
-end
-
-function extract_state(s::State, bit)
-    state::Uint, m1::Uint, m2 = zero(Uint), one(Uint) << (bit -1), one(Uint)
-    for i in one(Uint):convert(Uint, 2s.r+2)
-        if s.s[i] & m1 != 0
-            state = state | m2
-        end
-        m2 = m2 << 1
-    end
-#    println("state $bit $(pad(state))")
-    state
-end
-
-function encrypt{W<:Unsigned}(cache, s::State{W}, a::W, b::W)
-    carries::Uint  = 0x0
-    ap::W, bp::W = 0x0, 0x0
-    for i in 1:8*sizeof(W)
-        c::W, d::W, carries = encrypt_bit(cache, s.r, convert(Uint, a & 0x1), convert(Uint, b & 0x1), extract_state(s, i), carries)
-#        println("bit $i  $(a & 0x1) $(b & 0x1)  $c $d  $(pad(carries))")
-        a, b = a >> 1, b >> 1
-        ap, bp = ap | (c << (i-1)), bp | (d << (i-1))
-    end
-    ap, bp
-end
-                    
-
-function make_cached_dfs_noro{W<:Unsigned}(::Type{W}, r, len, cache)
-    return make_cached_dfs_noro(W, convert(Uint, r), convert(Uint, len), cache)
-end
-
-function make_cached_dfs_noro{W<:Unsigned}(::Type{W}, r::Uint, len::Uint, cache)
-
-    function solve(e)
-        ptext = collect((W, W), group(2, take(2*len, rands(W))))
-        ctext = (W,W)[e(a, b) for (a, b) in ptext]
-        width::Uint, depth::Uint = 2r+2, 8*sizeof(W)
-        U = uint_for_bits(width+1)  # extra bit for overflow
-        U = Uint64  # faster than minimum size above (left in for error check)
-        carries, rows = zeros(U, len, depth+1), zeros(U, depth)
-        overflow::U, inc::U, start::U = 1 << width, one(U), zero(U)
-
-        function test(row, level::Int)
-            rows[level] = row
-            for i in 1:len
-                a, b = ptext[i]
-                a1, b1 = ctext[i]
-                a2, b2, carries[i,level+1] = encrypt_bit(cache, r, 0x1 & (a >> (level-1)), 0x1 & (b >> (level-1)), row, carries[i,level])
-                if 0x1 & (a1 >> (level-1)) != a2 || 0x1 & (b1 >> (level-1)) != b2
-                    return false
-                end
-            end
-            true
-        end
-
-        function inner(level)
-            if level > depth
-                true
-            else
-                row = start
-                while row != overflow
-                    if test(row, level)
-#                        println("$level/$depth $(pad(row))")
-                        if inner(level + 1)
-                            return true
-                        end
-                    end
-                    row = row + inc
-                end
-                false
-            end
-        end
-        if inner(1)
-            state = State(r, zeros(W, width), rotate=false)
-            for i in one(Uint):depth
-                set_state!(state, rows[i], i)
-            end
-            state
-        else
-            error("no solution")
         end
     end
 end
@@ -798,12 +613,14 @@ function get{W<:Unsigned}(word::W, bit::Int)
     return (word >> (bit - 1)) & one(W)
 end
 
+# any way to have compact literal Uint apart from this?!
 const ZERO = zero(Uint)
 const ONE = one(Uint)
 const TWO = ONE+ONE
 const THREE = TWO+ONE
 const FOUR = THREE+ONE
 const FIVE = FOUR+ONE
+const SIX = FIVE+ONE
 const SIXTEEN = FOUR*FOUR
 const FIFTEEN = SIXTEEN-ONE
 
@@ -1011,7 +828,7 @@ function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2;
             end
         end
 
-         # set initial known values (no carries)
+        # set initial known values (no carries)
         bits(a::W, b::W) = convert(Uint8, (a & one(W)) | (b & one(W) << 1))
         for (i, (a, b)) in enumerate(chain(constants(W), spirals(W), 
                                            group(2, take(2*initial, rands(W)))))
@@ -1048,7 +865,7 @@ function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2;
             # returns the level to which we need to backtrack
             perm = sortperm(score, rev=true, alg=InsertionSort)
             known, score = known[:, :, perm], score[perm]
-            print_filter()
+#            print_filter()
             for i = 1:N-1
                 score[i] = convert(Int, floor(score[i] * decay))
             end
@@ -1064,7 +881,7 @@ function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2;
                     end
                 end
             end
-            print_pattern(N)
+#            print_pattern(N)
             level
         end
 
@@ -1138,26 +955,7 @@ function solutions()
                      k -> (a, b) -> encrypt(k, a, b), 
                      eq=same_ctext(1024, encrypt))
     return
-    cache = precalc()
-#    @time key_from_encrypt(1, make_cached_dfs_noro(Uint32, 0x3, 32, cache),
-#                     fake_keygen(Uint32, 0x3, 0x10, rotate=false),
-#                     k -> (a, b) -> encrypt(k, a, b), 
-#                     eq=same_ctext(1024, encrypt))
-#    return
-#    @profile key_from_encrypt(1, make_cached_dfs_noro(Uint32, 0x3, 32, cache),
-#                     fake_keygen(Uint32, 0x3, 0x10, rotate=false),
-#                     k -> (a, b) -> encrypt(k, a, b), 
-#                     eq=same_ctext(1024, encrypt))
-#    return
-    @time key_from_encrypt(1, make_dfs_noro(Uint32, 0x4, 32),
-                     fake_keygen(Uint32, 0x4, 0x10, rotate=false),
-                     k -> (a, b) -> encrypt(k, a, b), 
-                     eq=same_ctext(1024, encrypt))
-    @time key_from_encrypt(1, make_cached_dfs_noro(Uint32, 0x4, 32, cache),
-                     fake_keygen(Uint32, 0x4, 0x10, rotate=false),
-                     k -> (a, b) -> encrypt(k, a, b), 
-                     eq=same_ctext(1024, encrypt))
-    show_state(Uint8, 0x6, rotate=false)
+    show_state(Uint8, SIX, rotate=false)
     # no rotation and zero rounds
     key_from_encrypt(3, make_solve_r0(Uint32, 0x2), 
                      make_keygen(Uint32, 0x0, 0x2),
@@ -1266,20 +1064,6 @@ function assert_cache{W<:Unsigned}(cache, state::State{W})
     @assert d == f b
 end
 
-function test_cache()
-    cache = precalc()
-    z = zeros(Uint8, 16)
-    assert_cache(cache, State(Uint8, 0x0, z, rotate=false))
-    assert_cache(cache, State(Uint8, 0x1, z, rotate=false))
-    assert_cache(cache, State(Uint8, 0x2, z, rotate=false))
-    assert_cache(cache, State(Uint8, 0x3, z, rotate=false))
-    assert_cache(cache, State(Uint8, 0x4, z, rotate=false))
-    assert_cache(cache, State(Uint8, 0x8, z, rotate=false))
-    assert_cache(cache, State(Uint8, 0x6, z, rotate=false))
-    assert_cache(cache, State(Uint32, 0x0, z, rotate=false))
-    assert_cache(cache, State(Uint32, 0x8, z, rotate=false))
-end
-
 function test_set()
     @assert 0x2 == set(ZERO, 2, ONE)
     @assert 0x6 == set(ZERO, 2, THREE, 2)
@@ -1313,11 +1097,11 @@ function test_table2(table1, table2)
 end
 
 function test_cached_dfs_r5(table1, table2)
-    s = State(FIVE, collect(Uint32, take(12, rands(Uint32))), rotate=false)
-#    s = State(FIVE, zeros(Uint32, 12), rotate=false)
-#    s.s[1] = convert(Uint32, -1)
-#    s.s[2] = 0x55555555
-#    s.s[3] = convert(Uint32, -1)
+#    s = State(FIVE, collect(Uint32, take(12, rands(Uint32))), rotate=false)
+    s = State(FIVE, zeros(Uint32, 12), rotate=false)
+    s.s[1] = convert(Uint32, -1)
+    s.s[2] = 0x55555555
+    s.s[3] = convert(Uint32, -1)
     solve = make_cached_dfs_noro_r5(Uint32, table1, table2)
     s1 = solve((a, b) -> encrypt(s, a, b))
     println("\n$s\n$s1\n")
@@ -1364,7 +1148,6 @@ function tests()
     test_rotatel()
     test_vectors()
     test_8()
-    test_cache()
     test_set()
     table1, table2 = precalc2()
     test_table1(table1)
@@ -1375,6 +1158,6 @@ end
 
 
 tests()
-#solutions()
+solutions()
 
 end
