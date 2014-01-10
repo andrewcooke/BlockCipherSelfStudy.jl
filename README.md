@@ -76,14 +76,16 @@ bits cascade more (so there is some kind of geometric of exponential
 dependency on their values).  Adding a "beamwidth" limit to the search, or
 inverting or reversing the bits tried, does not help.
 
-### Relection
+### State - 32 bits 5 Rounds, No Rotation
 
-With no rotation, and ignoring the initial offset, each round is a bit
-permutation characterised by the state for that rotation, only.
+As above, but using
+[tabulated](https://github.com/andrewcooke/BlockCipherSelfStudy.jl/blob/master/src/RC5.jl#L561)
+results.
 
-So it seems like we may be able to tabulate the permutations in a single round
-(for some small number of bits) and use that to improve the speed of the
-search.
+Efficient pruning of the search is critical.  This is why so much time is
+spent on the first few bits - because it is difficult to discriminate good and
+bad answers at this level.  The approach here uses an adaptive set of filters,
+updated every few seconds.
 
 <!--
 [![Build Status](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl.png)](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl)
