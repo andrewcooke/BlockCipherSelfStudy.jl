@@ -83,9 +83,9 @@ As above, but using
 results.
 
 Efficient pruning of the search is critical.  This is why so much time is
-spent on the first few bits - because it is difficult to discriminate good and
-bad answers at this level.  The approach here uses an adaptive set of filters,
-updated every few seconds.
+spent on the first few bits (see above) - because it is difficult to
+discriminate good and bad answers at this level.  The approach here uses an
+adaptive set of filters, updated every few seconds.
 
 <!--
 [![Build Status](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl.png)](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl)
