@@ -861,6 +861,9 @@ function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2;
                 print_pattern(pattern)
             end
         end
+        function fmt_brief()
+            join(map(x -> "$x", score), " ")
+        end
         function update_filter(level::Int)
             # returns the level to which we need to backtrack
             perm = sortperm(score, rev=true, alg=InsertionSort)
@@ -869,11 +872,11 @@ function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2;
             for i = 1:N-1
                 score[i] = convert(Int, floor(score[i] * decay))
             end
+            score[N] = 0
             for j in 1:attempts
                 a, b = rand(W), rand(W)
                 ap, bp = e(a, b)
                 set_known(a, b, ap, bp, N)
-                score[N] = 0
                 for (l, (s2, s1)) in enumerate(take(level-1, group(2, path)))
                     if ! evaluate(s1, s2, l, N)
                         score[N] += 1
@@ -899,11 +902,15 @@ function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2;
         const state::State{W} = State(FIVE, zeros(W, WIDTH), rotate=false)
         function search(level::Int)
             # returns the level to which we must backtrack, or 0 on success
+            backtrack::Int = 0
             counter = counter + ONE
             if counter == period || level > DEPTH
                 println("$level $(fmt_path(level))")
+#                print("$level $(fmt_path(level))    $(fmt_brief()) /")
                 counter = ZERO
+                # filter before exiting when level > DEPTH to run final check
                 backtrack = update_filter(level)
+#                println(" $(fmt_brief())")
                 if backtrack < level
                     return backtrack
                 elseif level > DEPTH
