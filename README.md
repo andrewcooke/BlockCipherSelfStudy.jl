@@ -87,6 +87,9 @@ spent on the first few bits (see above) - because it is difficult to
 discriminate good and bad answers at this level.  The approach here uses an
 adaptive set of filters, updated every few seconds.
 
+A solution for the 16-byte zero key, found after 1/4 of the state space is
+explored, takes ~100 minutes.
+
 <!--
 [![Build Status](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl.png)](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl)
 -->

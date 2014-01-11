@@ -621,6 +621,7 @@ const THREE = TWO+ONE
 const FOUR = THREE+ONE
 const FIVE = FOUR+ONE
 const SIX = FIVE+ONE
+const EIGHT = FOUR+FOUR
 const SIXTEEN = FOUR*FOUR
 const FIFTEEN = SIXTEEN-ONE
 
@@ -948,6 +949,174 @@ function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2;
 end
 
 
+function make_cached_dfs_noro_r8{W<:Unsigned}(::Type{W}, table1, table2;
+                                              initial=4, attempts=100, decay=0.1, period=1000)
+    
+    const DEPTH::Int = 8 * sizeof(W)
+    const WIDTH::Uint = 2 * 8 + 2
+    # tables of state require 6 bits offset 8 bits so generate and mask
+    const SMASK::Uint = ((2 ^ 6) - 1) << 8
+    const SDELTA::Uint = 1 << 8      
+    # similar mask for carries
+    const CMASK::Uint = ((2 ^ 6) - 1) << 2
+
+    function solve(e)
+
+        const N::Int = initial + 8
+        known = zeros(Uint8, 3, DEPTH, N)
+        const score::Vector{Int} = zeros(Int, N)
+        
+        function set_known(a, b, ap, bp, i)
+            for level in 1:DEPTH
+                known[1, level, i] = bits(a, b)
+                known[3, level, i] = bits(ap, bp)
+                a, b, ap, bp = a >> 1, b >> 1, ap >> 1, bp >> 1
+            end
+        end
+
+        function evaluate(s1::Uint, s2::Uint, s3::Uint, level::Int, pattern::Int)
+            in1::Uint = convert(Uint, known[1, level, pattern]) | s1
+            out1::Uint = convert(Uint, table1[in1+ONE])
+            in2::Uint = (out1 & THREE) | convert(Uint, known[2, level, pattern]) | s2
+            out2::Uint = convert(Uint, table2[in2+ONE])
+            k = convert(Uint, known[3, level, pattern])
+            in3::Uint = (out2 & THREE) | (k & CMASK) | s3
+            out3::Uint = convert(Uint, table2[in3+ONE])
+            if out3 & THREE == k & THREE
+                if level < DEPTH
+                    known[1, level+1, pattern] = (known[1, level+1, pattern] & ~CMASK) | (out1 & CMASK)
+                    known[2, level+1, pattern] = out2 & CMASK
+                    known[3, level+1, pattern] = (known[3, level+1, pattern] & ~CMASK) | (out3 & CMASK)
+                end
+                true
+            else
+                false
+            end
+        end
+
+        # set initial known values (no carries)
+        bits(a::W, b::W) = convert(Uint8, (a & one(W)) | (b & one(W) << 1))
+        for (i, (a, b)) in enumerate(chain(constants(W), spirals(W), 
+                                           group(2, take(2*initial, rands(W)))))
+            ap, bp = e(a, b)
+            set_known(a, b, ap, bp, i)
+        end
+
+        const path::Vector{Uint} = zeros(Uint, DEPTH*3)
+        function fmt_path(level)
+            p = ""
+            for i in 1:3*(level-1)
+                p = "$p $(path[i] >> 8)"
+            end
+            p
+        end
+        function extract(ab, p, pattern)
+            val::W = zero(W)
+            for level in 1:DEPTH
+                val = val << 1
+                val = val | (known[p, level, pattern] >> (ab - 1)) & 0x1
+            end
+            val
+        end
+        function print_pattern(pattern)
+            a, b = extract(1, 1, pattern), extract(3, 1, pattern)
+            println("$(pad(a)) $(pad(b))  $(score[pattern])")
+        end
+        function print_filter()
+            for pattern in 1:N
+                print_pattern(pattern)
+            end
+        end
+        function fmt_brief()
+            join(map(x -> "$x", score), " ")
+        end
+        function update_filter(level::Int)
+            # returns the level to which we need to backtrack
+            perm = sortperm(score, rev=true, alg=InsertionSort)
+            known, score = known[:, :, perm], score[perm]
+#            print_filter()
+            for i = 1:N-1
+                score[i] = convert(Int, floor(score[i] * decay))
+            end
+            score[N] = 0
+            for j in 1:attempts
+                a, b = rand(W), rand(W)
+                ap, bp = e(a, b)
+                set_known(a, b, ap, bp, N)
+                for (l, (s3, s2, s1)) in enumerate(take(level-1, group(3, path)))
+                    if ! evaluate(s1, s2, s3, l, N)
+                        score[N] += 1
+                        return l
+                    end
+                end
+            end
+#            print_pattern(N)
+            level
+        end
+
+        function check(s1::Uint, s2::Uint, s3::Uint, level::Int)
+            for i in 1:N
+                if ! evaluate(s1, s2, s3, level, i)
+                    score[i] += 1
+                    return false
+                end
+            end
+            true
+        end
+
+        counter::Uint = ZERO
+        const state::State{W} = State(EIGHT, zeros(W, WIDTH), rotate=false)
+        function search(level::Int)
+            # returns the level to which we must backtrack, or 0 on success
+            backtrack::Int = 0
+            counter = counter + ONE
+            if counter == period || level > DEPTH
+#                println("$level $(fmt_path(level))")
+                print("$level $(fmt_path(level))    $(fmt_brief()) /")
+                counter = ZERO
+                # filter before exiting when level > DEPTH to run final check
+                backtrack = update_filter(level)
+                println(" $(fmt_brief())")
+                if backtrack < level
+                    return backtrack
+                elseif level > DEPTH
+                    return 0
+                end
+            end
+            # if we are not backtracking, search next level
+            for s3 in ZERO:SDELTA:SMASK
+                path[THREE*level-TWO] = s3
+                for s2 in ZERO:SDELTA:SMASK
+                    path[THREE*level-ONE] = s2
+                    for s1 in ZERO:SDELTA:SMASK
+                        # do we encrypt correctly?
+                        if check(s1, s2, s3, level)
+                            path[THREE*level] = s1
+                            backtrack = search(level+1)
+                            if backtrack == 0
+                                set_state!(state, (s1 >> 8) | (s2 >> 2) | (s3 << 4), level)
+                            end
+                            if backtrack < level
+                                return backtrack
+                            end
+                        end
+                    end
+                end
+            end
+            # should return level-1 but (1) it saves a subtraction and
+            # (2) it indicates failure to converge at top level
+            return level
+        end
+        if 0 == search(1)
+            state
+        else
+            error("no solution")
+        end
+    end
+
+end
+
+
 # ---- validate solutions
 
 make_keygen(w, r, k; rotate=true) = 
@@ -957,8 +1126,8 @@ fake_keygen(w, r, k; rotate=true) =
 
 function solutions()
     table1, table2 = precalc2()
-    @time key_from_encrypt(1, make_cached_dfs_noro_r5(Uint32, table1, table2),
-                     fake_keygen(Uint32, 0x5, 0x10, rotate=false),
+    @time key_from_encrypt(1, make_cached_dfs_noro_r8(Uint32, table1, table2, period=10),
+                     fake_keygen(Uint32, 0x8, 0x10, rotate=false),
                      k -> (a, b) -> encrypt(k, a, b), 
                      eq=same_ctext(1024, encrypt))
     return
@@ -1019,6 +1188,11 @@ function solutions()
     # DFS, 32 bits, no rotation, 4 rounds
     key_from_encrypt(1, make_dfs_noro(Uint32, 0x4, 32),
                      make_keygen(Uint32, 0x4, 0x10, rotate=false),
+                     k -> (a, b) -> encrypt(k, a, b), 
+                     eq=same_ctext(1024, encrypt))
+    # DFS w table, 32 bits, no rotation, 5 rounds
+    key_from_encrypt(1, make_cached_dfs_noro_r5(Uint32, table1, table2),
+                     fake_keygen(Uint32, 0x5, 0x10, rotate=false),
                      k -> (a, b) -> encrypt(k, a, b), 
                      eq=same_ctext(1024, encrypt))
 end
