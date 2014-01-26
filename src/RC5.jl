@@ -1202,6 +1202,39 @@ function trace{W<:Unsigned}(state::State{W}, a::W, b::W;
     return string(reshape(chars, length(chars))...)
 end
 
+function diff(c1, c2)
+    w, h = size(c1)
+    @assert (w, h) == size(c2)
+    d = Array(Char, w, h)
+    fill!(d, ' ')
+    fill!(slice(d, w, 1:h), '\n')
+    for i in 1:w
+        for j in 1:h
+            if c1[i, j] != c2[i, j]
+                d[i, j] = c2[i, j]
+            end
+        end
+    end
+    d
+end
+
+function delta{W<:Unsigned}(state::State{W}, a::W, b::W;
+                            title=true, range=1:0)
+    t = Array(Trace{W}, 0)
+    encrypt(state, a, b, t)
+    chars = format(t, title=title, range=range)
+    println()
+    println(string(reshape(chars, length(chars))...))
+
+    chars = format(t, title=false, range=range)
+    for i::W in 0x1:0x2
+        u = Array(Trace{W}, 0)
+        encrypt(state, a $ one(W), i == 1 ? b : (b $ one(W) << 1), u)
+        d = diff(chars, format(u, title=false, range=range))
+        println(string(reshape(d, length(d))...))
+    end
+end
+
 
 # ---- validate solutions
 
@@ -1288,7 +1321,7 @@ end
 function test_trace()
     println(trace(State(Uint16, 0x3, zeros(Uint8, 16), rotate=false), 
                   0x0000, 0x0000))
-    
+    delta(State(Uint8, 0x3, zeros(Uint8, 16), rotate=false), 0x00, 0x00)
 end
 
 function test_rotatel()
