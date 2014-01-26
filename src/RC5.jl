@@ -1,10 +1,4 @@
 
-# TODO - WTF?!
-# ffffffff => 40dea528  00000000 => e54791dc
-# 00000000 => 40dea6a7  ffffffff => e5479830
-# ffffffff => 40dea545  ffffffff => e54791eb
-
-
 module RC5
 using Blocks, Solve, Tasks, Debug, GA
 
@@ -358,7 +352,7 @@ typealias Score (Float64, Vector{Int})
 Base.isless{W<:Unsigned}(s1::State{W}, s2::State{W}) = false
 Base.isless(a1::Vector{Int}, a2::Vector{Int}) = 
 length(a1) == length(a2) && length(a1) > 0 && 
-(a1[1] < a2[1] || (a1[1] == a2[1] && length(a1) > 1 && a1[2:] < a2[2:]))
+(a1[1] < a2[1] || (a1[1] == a2[1] && length(a1) > 1 && a1[2:end] < a2[2:end]))
 
 # custom state added to the population
 type Context
@@ -532,27 +526,6 @@ function make_dfs_noro{W<:Unsigned}(::Type{W}, r, len)
             state
         else
             error("no solution")
-        end
-    end
-end
-
-
-# ---- show how different parts of the state affect output
-
-function show_state{W<:Unsigned}(::Type{W}, r::Uint; rotate=true)
-    state = State(r, zeros(W, sizeof(W) * (2r+2)), rotate=rotate)
-    z = zero(W)
-    a, b = encrypt(state, z, z)
-    println("default $(pad(a)) $(pad(b))")
-    function print_bit(state, bit, round)
-        state.s[round] = one(W) << (bit - 1)
-        a, b = encrypt(state, z, z)
-        println("bit $(bit) rnd $(round-1) $(pad(a)) $(pad(b))")
-        state.s[round] = zero(W)
-    end
-    for bit in [1,2,3,4,5,6,7,8]
-        for round in 1:(2r+2)
-            print_bit(state, bit, round)
         end
     end
 end
@@ -1117,6 +1090,119 @@ function make_cached_dfs_noro_r8{W<:Unsigned}(::Type{W}, table1, table2;
 end
 
 
+# ---- statistical
+
+
+type Trace{W<:Unsigned}
+    header::String
+    value::Union(W, Nothing)
+end
+
+Trace{W<:Unsigned}(header::String, ::Type{W}) = Trace{W}(header, nothing)
+
+
+function encrypt{W<:Unsigned}(s::State{W}, a::W, b::W, trace::Vector{Trace{W}})
+
+    function apply(f, op::String, arg1::W, head1::Union(String, Nothing), 
+                   arg2::W, head2::String, head3::String)
+        if head1 != nothing
+            push!(trace, Trace(head1, arg1))
+        end
+        push!(trace, Trace(op, W))
+        push!(trace, Trace(head2, arg2))
+        result::W = f(arg1, arg2)
+        push!(trace, Trace("=", W))
+        push!(trace, Trace(head3, result))
+        result
+    end
+
+    function add(arg1::W, head1::String, arg2::W, head2::String)
+        apply(+, "+", arg1, head1, arg2, head2, head1)
+    end
+
+    function add(arg1::W, arg2::W, head2::String, head3::String)
+        apply(+, "+", arg1, nothing, arg2, head2, head3)
+    end
+
+    function xor(arg1::W, head1::String, arg2::W, head2::String)
+        apply($, "x", arg1, head1, arg2, head2, head1)
+    end
+
+    function rot(arg1::W, arg2::W, head2::String, head3::String)
+        apply(rotatel, "<", arg1, nothing, arg2, head2, head3)
+    end
+
+    function space()
+        push!(trace, Trace(" ", W))
+    end
+
+    a::W = add(a, "a", s.s[1], "s0")
+    space()
+    b::W = add(b, "b", s.s[2], "s1")
+    space()
+
+    for i in 1:s.r
+
+        a = xor(a, "a", b, "b")
+        if s.rotate
+            a = rot(a, b, "b", "a")
+        end
+        a = add(a, s.s[2i+1], "s$(2i)", "a")
+        space()
+
+        b = xor(b, "b", a, "a")
+        if s.rotate
+            b = rot(b, a, "a", "b")
+        end
+        b = add(b, s.s[2i+2], "s$(2i+1)", "b")
+        space()
+
+    end
+
+    push!(trace, Trace("a", a))
+    a, b
+end
+
+function format_string!(chars, text)
+    for (i, c) in enumerate(text)
+        chars[i] = c
+    end
+end
+
+function format{W<:Unsigned}(trace::Vector{Trace{W}}; 
+                             title=true, range=1:0)
+    if range.len < 1
+        range = 1:8*sizeof(W)
+    end
+    header = title ? 1 + maximum(map(t -> length(t.header), trace)) : 0
+    height = header + range.len
+    width = 1 + length(trace)
+    chars = Array(Char, width, height)
+    fill!(chars, ' ')
+    fill!(slice(chars, width, 1:height), '\n')
+    for i in 1:width-1
+        if trace[i].value != nothing
+            format_string!(slice(chars, i, header+1:height), 
+                           bits(trace[i].value)[range])
+            if title
+                format_string!(slice(chars, i, 1:header), trace[i].header)
+            end
+        else
+            fill!(slice(chars, i, header+1:8:height), trace[i].header[1])
+        end
+    end
+    chars
+end
+
+function trace{W<:Unsigned}(state::State{W}, a::W, b::W;
+                            title=true, range=1:0)
+    t = Array(Trace{W}, 0)
+    encrypt(state, a, b, t)
+    chars = format(t, title=title, range=range)
+    return string(reshape(chars, length(chars))...)
+end
+
+
 # ---- validate solutions
 
 make_keygen(w, r, k; rotate=true) = 
@@ -1125,15 +1211,8 @@ fake_keygen(w, r, k; rotate=true) =
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
-    table1, table2 = precalc2()
-    @time key_from_encrypt(1, make_cached_dfs_noro_r8(Uint32, table1, table2, period=10),
-                     fake_keygen(Uint32, 0x8, 0x10, rotate=false),
-                     k -> (a, b) -> encrypt(k, a, b), 
-                     eq=same_ctext(1024, encrypt))
-    return
-    show_state(Uint8, SIX, rotate=false)
-    # no rotation and zero rounds
-    key_from_encrypt(3, make_solve_r0(Uint32, 0x2), 
+    # no rotation and zero rounds 
+   key_from_encrypt(3, make_solve_r0(Uint32, 0x2), 
                      make_keygen(Uint32, 0x0, 0x2),
                      k -> ptext -> encrypt(k, ptext), eq=same_state)
     # one rotation, exact back-calculation, 8 bits
@@ -1190,15 +1269,27 @@ function solutions()
                      make_keygen(Uint32, 0x4, 0x10, rotate=false),
                      k -> (a, b) -> encrypt(k, a, b), 
                      eq=same_ctext(1024, encrypt))
-    # DFS w table, 32 bits, no rotation, 5 rounds
+    # DFS w table, 32 bits, no rotation, 5 rounds (~100 min)
+    table1, table2 = precalc2()
     key_from_encrypt(1, make_cached_dfs_noro_r5(Uint32, table1, table2),
                      fake_keygen(Uint32, 0x5, 0x10, rotate=false),
                      k -> (a, b) -> encrypt(k, a, b), 
                      eq=same_ctext(1024, encrypt))
+    # DFS w table, 32 bits, no rotation, 8 rounds (does not complete)
+#    key_from_encrypt(1, make_cached_dfs_noro_r8(Uint32, table1, table2, period=10),
+#                     fake_keygen(Uint32, 0x8, 0x10, rotate=false),
+#                     k -> (a, b) -> encrypt(k, a, b), 
+#                     eq=same_ctext(1024, encrypt))
 end
 
 
 # ---- tests
+
+function test_trace()
+    println(trace(State(Uint16, 0x3, zeros(Uint8, 16), rotate=false), 
+                  0x0000, 0x0000))
+    
+end
 
 function test_rotatel()
     y = rotatel(0x81, 0x1)
@@ -1326,19 +1417,20 @@ function test_chars()
 end
 
 function tests()
-    test_rotatel()
-    test_vectors()
-    test_8()
-    test_set()
-    table1, table2 = precalc2()
-    test_table1(table1)
-    test_table2(table1, table2)
-    test_cached_dfs_r5(table1, table2)
-    test_chars()
+#    test_rotatel()
+#    test_vectors()
+#    test_8()
+#    test_set()
+#    table1, table2 = precalc2()
+#    test_table1(table1)
+#    test_table2(table1, table2)
+#    test_cached_dfs_r5(table1, table2)
+#    test_chars()
+    test_trace()
 end
 
 
 tests()
-solutions()
+#solutions()
 
 end
