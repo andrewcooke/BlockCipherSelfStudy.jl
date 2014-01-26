@@ -90,13 +90,13 @@ adaptive set of filters, updated every few seconds.
 A solution for the 16-byte zero key, found after 1/4 of the state space is
 explored, takes ~100 minutes.
 
-### Linearity and Carries
+### Ripple Diagrams
 
 Trying to understand linear cryptanalysis (and/or just simple linear
 functions), I generated plots that show how carries ripple through the
 encryption process.
 
-The diagram below is for 8-bit half-blocs, three rounds.  It shows the
+The diagram below is for 8-bit half-blocks, three rounds.  It shows the
 encryption for a,b = 0,0 and then the changes to that when the lowest bit of
 a, and the next highest bit of b, are changed.
 
