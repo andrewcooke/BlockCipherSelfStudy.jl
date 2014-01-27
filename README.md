@@ -7,7 +7,7 @@ formal proofs of more complex systems.  So this is just me pootling around in
 my free time, following [Bruce Schneier's self-study
 course](https://github.com/andrewcooke/BlockCipherSelfStudy.jl/blob/master/doc/schneier-self-study.pdf).
 
-## RC5
+## RC5 Without Rotation
 
 [Defined
 here](https://github.com/andrewcooke/BlockCipherSelfStudy.jl/blob/master/doc/rivest-rc5.pdf),
@@ -136,10 +136,18 @@ b a+s axb a+s axb a+s axb a+s a
 Yet various places assert that RC5 without rotation "is linear".
 
 If linearity is taken to mean, loosely, that a solution can be composed from
-smaller parts, then the only way that RC5 without rotation is non-linear is
-that the lowest bit is independent of other bits.  This leads to attacks which
-progressively solve "upwards" from the least significant bit, as described
-above.
+smaller parts, then the only way that RC5 without rotation is non-linear, as
+far as I can tell, is that the lowest bit is independent of other bits.  This
+leads to attacks which progressively solve "upwards" from the least
+significant bit, as described above.
+
+At the same time, my limited understanding of linear and differential attacks
+suggests that RC5 wihout rotation is, in a sense, "too linear".  I can't find
+a way to relate "distant" bits without also considering key expansion.  But
+this may be my inexperience, or simply laziness (perhaps key expansion must be
+included).
+
+So I am going to move to a different cipher.
 
 <!--
 [![Build Status](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl.png)](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl)
