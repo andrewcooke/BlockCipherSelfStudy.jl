@@ -33,7 +33,7 @@ const P64 = 0xb7e151628aed2a6b
 const Q64 = 0x9e3779b97f4a7c15
 
 immutable State{W<:Unsigned}
-    r::Uint
+    r::Uint8
     k::Array{Uint8}
     s::Array{W}
     rotate::Bool
@@ -1090,7 +1090,7 @@ function make_cached_dfs_noro_r8{W<:Unsigned}(::Type{W}, table1, table2;
 end
 
 
-# ---- statistical
+# ---- ripple diagrams
 
 
 type Trace{W<:Unsigned}
@@ -1111,7 +1111,7 @@ function encrypt{W<:Unsigned}(s::State{W}, a::W, b::W, trace::Vector{Trace{W}})
         push!(trace, Trace(op, W))
         push!(trace, Trace(head2, arg2))
         result::W = f(arg1, arg2)
-        push!(trace, Trace("=", W))
+        push!(trace, Trace(" ", W))
         push!(trace, Trace(head3, result))
         result
     end
@@ -1128,6 +1128,10 @@ function encrypt{W<:Unsigned}(s::State{W}, a::W, b::W, trace::Vector{Trace{W}})
         apply($, "x", arg1, head1, arg2, head2, head1)
     end
 
+    function xor(arg1::W, arg2::W, head2::String, head3::String)
+        apply($, "x", arg1, nothing, arg2, head2, head3)
+    end
+
     function rot(arg1::W, arg2::W, head2::String, head3::String)
         apply(rotatel, "<", arg1, nothing, arg2, head2, head3)
     end
@@ -1136,30 +1140,28 @@ function encrypt{W<:Unsigned}(s::State{W}, a::W, b::W, trace::Vector{Trace{W}})
         push!(trace, Trace(" ", W))
     end
 
+    push!(trace, Trace("b", b))
+    space()
+
     a::W = add(a, "a", s.s[1], "s0")
-    space()
-    b::W = add(b, "b", s.s[2], "s1")
-    space()
+    b::W = b + s.s[2]
 
     for i in 1:s.r
 
-        a = xor(a, "a", b, "b")
+        a = xor(a, b, "b", "a")
         if s.rotate
             a = rot(a, b, "b", "a")
         end
         a = add(a, s.s[2i+1], "s$(2i)", "a")
-        space()
 
-        b = xor(b, "b", a, "a")
+        b = b $ a
         if s.rotate
-            b = rot(b, a, "a", "b")
+            b = rotatel(b, a)
         end
-        b = add(b, s.s[2i+2], "s$(2i+1)", "b")
-        space()
+        b = b + s.s[2i+2]
 
     end
 
-    push!(trace, Trace("a", a))
     a, b
 end
 
@@ -1184,11 +1186,11 @@ function format{W<:Unsigned}(trace::Vector{Trace{W}};
         if trace[i].value != nothing
             format_string!(slice(chars, i, header+1:height), 
                            bits(trace[i].value)[range])
-            if title
-                format_string!(slice(chars, i, 1:header), trace[i].header)
-            end
         else
             fill!(slice(chars, i, header+1:8:height), trace[i].header[1])
+        end
+        if title
+            format_string!(slice(chars, i, 1:header), trace[i].header)
         end
     end
     chars
@@ -1218,21 +1220,85 @@ function diff(c1, c2)
     d
 end
 
-function delta{W<:Unsigned}(state::State{W}, a::W, b::W;
-                            title=true, range=1:0)
+function print_delta{W<:Unsigned}(state::State{W}, ab::Vector{(W,W)};
+                                  range=1:0)
     t = Array(Trace{W}, 0)
+    a, b = ab[1]
     encrypt(state, a, b, t)
-    chars = format(t, title=title, range=range)
+    chars = format(t, title=true, range=range)
     println()
     println(string(reshape(chars, length(chars))...))
 
-    chars = format(t, title=false, range=range)
-    for i::W in 0x1:0x2
+    reference = format(t, title=false, range=range)
+    for (a, b) in ab[2:end]
         u = Array(Trace{W}, 0)
-        encrypt(state, a $ one(W), i == 1 ? b : (b $ one(W) << 1), u)
-        d = diff(chars, format(u, title=false, range=range))
+        encrypt(state, a, b, u)
+        d = diff(reference, format(u, title=false, range=range))
         println(string(reshape(d, length(d))...))
     end
+end
+
+function prove_carry{W<:Unsigned}(::Type{W}, r::Uint8, s, nmax)
+
+    # the idea here was that the final addition leaked information via
+    # the carry.  but it doesn't.
+
+    n_strong, n_weak = 0, 0
+    for i in 1:nmax
+        state = State(W, r, collect(Uint8, take(s, rands(Uint8))), 
+                      rotate=false)
+        a, b = collect(W, take(2, rands(W)))
+        ap, bp = encrypt(state, a, b)
+        a1, _ = encrypt(state, a $ one(W), b)
+        a2, _ = encrypt(state, a $ one(W), b $ (one(W) << 1))
+#        println("$a $ap $a1 $a2")
+        if 0 == state.s[2r+1] & 0x1
+            # if bit 0 of the final state added to a is zero then we will
+            # one of a1 or a2 will not have a carry into bit 1
+            if 0 != (ap $ a1) & 0x2 && 0 != (ap $ a2) & 0x2
+#                println("\ncounter-example - both have carries")
+#                print_delta(state, [(a, b), (a $ one(W), b), 
+#                                    (a $ one(W), b $ (one(W) << 1))])
+            else
+                n_strong += 1
+            end
+        else
+            # if bit 0 is 1 then a1 will always have a carry
+            if 0 == (ap $ a1) & 0x2
+#                println("\ncounter-example - no carry")
+#                print_delta(state, [(a, b), (a $ one(W), b)])
+            else
+                n_weak += 1
+            end
+        end
+    end
+    println("carry count: $n_strong / $n_weak")
+end
+
+function prove_nonlinear{W<:Unsigned}(::Type{W}, r::Uint8, k, nmax)
+    n_add, n_xor = 0, 0
+    for i in 1:nmax
+        state = State(W, r, collect(Uint8, take(k, rands(Uint8))), 
+                      rotate=false)
+        a, b, c, d = collect(W, take(4, rands(W)))
+        p, q = encrypt(state, convert(W, a+c), convert(W, b+d))
+        rs1 = encrypt(state, a, b)
+        rs2 = encrypt(state, c, d)
+        r = convert(W, rs1[1] + rs2[1])
+        s = convert(W, rs1[2] + rs2[2])
+        if p == r && q == s
+            n_add += 1
+        end
+        p, q = encrypt(state, a$c, b$d)
+        rs1 = encrypt(state, a, b)
+        rs2 = encrypt(state, c, d)
+        r::W = rs1[1] $ rs2[1]
+        s::W = rs1[2] $ rs2[2]
+        if p == r && q == s
+            n_xor += 1
+        end        
+    end
+    println("linear count: $n_add / $n_xor")
 end
 
 
@@ -1321,7 +1387,8 @@ end
 function test_trace()
     println(trace(State(Uint16, 0x3, zeros(Uint8, 16), rotate=false), 
                   0x0000, 0x0000))
-    delta(State(Uint8, 0x3, zeros(Uint8, 16), rotate=false), 0x00, 0x00)
+    print_delta(State(Uint8, 0x3, zeros(Uint8, 16), rotate=false), 
+                [(0x00, 0x00), (0x01, 0x00), (0x01, 0x02)])
 end
 
 function test_rotatel()
@@ -1414,7 +1481,7 @@ function test_cached_dfs_r5(table1, table2)
 #    solve((a, b) -> encrypt(s, a, b))
 end
 
-function test_chars()
+function test_charsa()
     # test strange result
     # level 31  33 37 42 49 37 48 38 37 41 62 46 63 24 49 7 63 15 45 3 32 36 40 56 17 18 8 6 32 47 6 39 52 20 3 16 4 1 6 46 10 60 32 54 4 24 59 19 37 0 1 7 24 6 51 8 23 0 5 3 36
     # RC5-32/5/0 0x s:1a3049ebb8d360b01df181b90540ddb0c1d240f6a41ce7ffd963eb95348d3baa13f1f5ac6a4389729dc4984014a6cc3f
@@ -1450,16 +1517,17 @@ function test_chars()
 end
 
 function tests()
-#    test_rotatel()
-#    test_vectors()
-#    test_8()
-#    test_set()
-#    table1, table2 = precalc2()
-#    test_table1(table1)
-#    test_table2(table1, table2)
-#    test_cached_dfs_r5(table1, table2)
-#    test_chars()
+    test_rotatel()
+    test_vectors()
+    test_8()
+    test_set()
+    table1, table2 = precalc2()
+    test_table1(table1)
+    test_table2(table1, table2)
+    test_cached_dfs_r5(table1, table2)
     test_trace()
+    prove_carry(Uint8, 0x3, 2, 10000)
+    prove_nonlinear(Uint8, 0x3, 2, 10000)
 end
 
 
