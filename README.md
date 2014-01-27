@@ -90,45 +90,56 @@ adaptive set of filters, updated every few seconds.
 A solution for the 16-byte zero key, found after 1/4 of the state space is
 explored, takes ~100 minutes.
 
-### Ripple Diagrams
+### Linearity
 
-Trying to understand linear cryptanalysis (and/or just simple linear
-functions), I generated plots that show how carries ripple through the
-encryption process.
-
-The diagram below is for 8-bit half-blocks, three rounds.  It shows the
-encryption for a,b = 0,0 and then the changes to that when the lowest bit of
-a, and the next highest bit of b, are changed.
+RC5 without rotation is *not* linear.  In other words, whether `.` is addition
+or xor,
 
 ```
-a s a b s b a b a s a b a b s b a b a s a b a b s b a b a s a b a b s b a
-  0     1         2         3         4         5         6         7    
-                                                                         
-0+0=0 0+0=0 0x0=0+1=0 0x0=0+1=0 0x0=0+0=0 0x0=0+0=1 0x1=1+0=1 1x1=0+1=0 1
-0 1 1 0 0 0 1 0 1 1 0 0 0 0 1 0 0 0 0 0 1 0 1 1 1 1 1 1 0 0 0 1 0 1 0 0 0
-0 0 0 0 0 0 0 0 0 0 1 0 1 1 0 0 1 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0 1 1 1 0 1
-0 1 1 0 1 1 1 1 0 1 0 1 0 1 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0
-0 1 1 0 0 0 1 0 1 0 0 0 0 0 1 1 0 1 1 1 0 1 0 1 0 0 0 0 0 1 0 0 0 0 0 0 0
-0 1 1 0 0 0 1 0 1 1 0 0 0 0 0 0 0 0 0 0 1 0 1 1 0 0 1 0 1 0 0 0 0 0 1 1 0
-0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 1 1 1 0 1 0 1 1 1 0 1 1 1 0 1 0 1 0 1 0
-0 0 0 0 0 0 0 0 0 1 1 0 1 1 0 1 1 1 0 0 0 1 0 1 1 0 0 0 0 0 0 0 0 0 0 0 0
-
-                                                            0   0 1     0
-                                                  0   0 1     0   0   1  
-                                                  1   1 1   0 1 0       0
-                                                  1   1 1   1 1 1     1 1
-                                        1   1 0     1   1   1   1 1     1
-                              1   1 1   0 1 0     1 0 1       1   1   0  
-                    1   1 1   0 1 0       0   0                          
-1   1       1   1   0   0 0   0 0 0       0   0   1   1 1   1 1 1       1
-                                                                         
-
-                              1   1 1     1   1   1   1 1   1 1 1       1
-                              0   0 0   1 0 1       1   1   1   1 1   1 1
-                    1   1 1     1   1                                    
-      1   1   1 1     1   1   0   0 0   1 0 1     0 1 0       0   0   0  
-1   1       1   1   0   0 0   0 0 0       0   0   1   1 1   1 1 1       1
+p, q = encrypt(a.c, b.d)
+r1, s1 = encrypt(a, b)
+r2, s2 = encrypt(c, d)
+p != r1.r2 && q != s1.s2
 ```
+
+The source of the non-linearity is the combination of addition (with carry)
+and xor.  If you describe a round as addition over words then the xor is
+non-linear; if you describe it as addition over bits (ie xor) then the carry
+operations are non-linear.
+
+The diagram below shows how carries ripple out when the least significant bit
+of one half-block is changed (only half the encryption process is shown):
+
+```
+b a+s axb a+s axb a+s axb a+s a
+    0       2       4       6  
+                               
+0 0+0 0x0 0+1 0x0 0+0 0x1 1+0 1
+0 0 1 1 0 1 1 0 0 0 0 1 1 0 0 0
+0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 1
+0 0 1 1 1 0 1 0 0 0 1 0 0 0 1 0
+0 0 1 1 0 1 0 0 1 1 1 0 0 0 1 0
+0 0 1 1 0 1 1 0 0 0 0 1 0 1 0 0
+0 0 0 0 0 0 0 0 1 1 1 0 1 1 1 0
+0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0
+
+                              0
+                        0 1    
+                        1 1   0
+                        1 1   1
+                      1   1   1
+                1 1   0 1      
+              1 0              
+  1   1   1   0 0       1 1   1
+```
+
+Yet various places assert that RC5 without rotation "is linear".
+
+If linearity is taken to mean, loosely, that a solution can be composed from
+smaller parts, then the only way that RC5 without rotation is non-linear is
+that the lowest bit is independent of other bits.  This leads to attacks which
+progressively solve "upwards" from the least significant bit, as described
+above.
 
 <!--
 [![Build Status](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl.png)](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl)
