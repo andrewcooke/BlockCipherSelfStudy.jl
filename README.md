@@ -136,8 +136,8 @@ b a+s axb a+s axb a+s axb a+s a
 Yet various places assert that RC5 without rotation "is linear".
 
 If linearity is taken to mean, loosely, that a solution can be composed from
-smaller parts, then the only way that RC5 without rotation is non-linear, as
-far as I can tell, is that the lowest bit is independent of other bits.  This
+smaller parts, then the only way that RC5 without rotation is linear, as far
+as I can tell, is that the lowest bit is independent of other bits.  This
 leads to attacks which progressively solve "upwards" from the least
 significant bit, as described above.
 
