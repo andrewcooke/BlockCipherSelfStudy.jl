@@ -32,24 +32,33 @@ const Q32 = 0x9e3779b9
 const P64 = 0xb7e151628aed2a6b
 const Q64 = 0x9e3779b97f4a7c15
 
-immutable State{W<:Unsigned}
+abstract Rotation
+type NoRotation <: Rotation end
+type RoundRotation <: Rotation end
+type FullRotation <: Rotation end
+
+immutable State{W<:Unsigned, R<:Rotation}
     r::Uint8
     k::Array{Uint8}
     s::Array{W}
-    rotate::Bool
+    rotate::Type{R}
 end
 
-State(w::Type{Uint8}, r::Uint8, k::Array{Uint8}; rotate=true) = 
-State{w}(r, k, expand_key(r, k, P8, Q8), rotate)
+State{R<:Rotation}(w::Type{Uint8}, r::Uint8, k::Array{Uint8}; 
+      rotate::Type{R}=FullRotation) = 
+State{w, R}(r, k, expand_key(r, k, P8, Q8), rotate)
 
-State(w::Type{Uint16}, r::Uint8, k::Array{Uint8}; rotate=true) = 
-State{w}(r, k, expand_key(r, k, P16, Q16), rotate)
+State{R<:Rotation}(w::Type{Uint16}, r::Uint8, k::Array{Uint8}; 
+      rotate::Type{R}=FullRotation) = 
+State{w, R}(r, k, expand_key(r, k, P16, Q16), rotate)
 
-State(w::Type{Uint32}, r::Uint8, k::Array{Uint8}; rotate=true) = 
-State{w}(r, k, expand_key(r, k, P32, Q32), rotate)
+State{R<:Rotation}(w::Type{Uint32}, r::Uint8, k::Array{Uint8}; 
+      rotate::Type{R}=FullRotation) = 
+State{w, R}(r, k, expand_key(r, k, P32, Q32), rotate)
 
-State(w::Type{Uint64}, r::Uint8, k::Array{Uint8}; rotate=true) = 
-State{w}(r, k, expand_key(r, k, P64, Q64), rotate)
+State{R<:Rotation}(w::Type{Uint64}, r::Uint8, k::Array{Uint8}; 
+      rotate::Type{R}=FullRotation) = 
+State{w, R}(r, k, expand_key(r, k, P64, Q64), rotate)
 
 function parse_state{W<:Unsigned}(::Type{W}, s)
     if in(',', s)
@@ -61,10 +70,13 @@ function parse_state{W<:Unsigned}(::Type{W}, s)
 end
 
 # create with a known state (no key)
-State{W<:Unsigned}(r::Uint, s::Array{W}; rotate=true) = 
-State{W}(r, Uint8[], s, rotate)
-State{W<:Unsigned}(::Type{W}, r::Uint, s::String; rotate=true) = 
-State{W}(r, Uint8[], parse_state(W, s), rotate)
+State{W<:Unsigned, R<:Rotation}(r::Uint, s::Array{W}; 
+                                rotate::Type{R}=FullRotation) = 
+                                State{W, R}(r, Uint8[], s, rotate)
+
+State{W<:Unsigned, R<:Rotation}(::Type{W}, r::Uint, s::String; 
+                                rotate::Type{R}=FullRotation) = 
+                                State{W, R}(r, Uint8[], parse_state(W, s), rotate)
 
 sprintf_state{W<:Unsigned}(s::State{W}) = join(map(pad, s.s), ",")
 
@@ -84,8 +96,12 @@ function rotatel{W<:Unsigned}(x::W, n::Unsigned)
     convert(W, (x << m) | (x >>> (w - m)))
 end
 
-rotatel{W<:Unsigned}(::Type{W}, x::Integer, n::Integer) = 
-rotatel(convert(W, x), n)
+rotatel{W<:Unsigned}(::Type{NoRotation}, a::W, b::W, i::Unsigned) = a
+
+rotatel{W<:Unsigned}(::Type{RoundRotation}, a::W, b::W, i::Unsigned) = rotatel(a, i)
+
+rotatel{W<:Unsigned}(::Type{FullRotation}, a::W, b::W, i::Unsigned) = rotatel(a, b)
+
 
 function expand_key{W<:Unsigned}(r::Uint8, k::Array{Uint8}, p::W, q::W)
     u = sizeof(W)
@@ -104,9 +120,9 @@ function expand_key{W<:Unsigned}(r::Uint8, k::Array{Uint8}, p::W, q::W)
     i = j = 0
     a::W, b::W = 0x0, 0x0
     for _ = 1:3*max(t, c)
-        s[i+1] = rotatel(W, s[i+1] + (a + b), 0x3)
+        s[i+1] = rotatel(convert(W, s[i+1] + (a + b)), 0x3)
         a = s[i+1]
-        l[j+1] = rotatel(W, l[j+1] + (a + b), a + b)
+        l[j+1] = rotatel(convert(W, l[j+1] + (a + b)), a + b)
         b = l[j+1]
         i = (i+1) % t
         j = (j+1) % c
@@ -120,19 +136,15 @@ function encrypt{W<:Unsigned}(s::State{W}, a::W, b::W)
     a::W = a + s.s[1]
 #    println("b $(pad(b)) + $(pad(s.s[2]))")
     b::W = b + s.s[2]
-    for i in 1:s.r
+    for i in 0x1:s.r
 #        println("a $(pad(a)) x $(pad(b))")
         a = a $ b
-        if s.rotate
-            a = rotatel(a, b)
-        end
+        a = rotatel(s.rotate, a, b, i)
 #        println("a $(pad(a)) + $(pad(s.s[2i+1]))")
         a = a + s.s[2i+1]
 #        println("b $(pad(b)) x $(pad(a))")
         b = b $ a
-        if s.rotate
-            b = rotatel(b, a)
-        end
+        b = rotatel(s.rotate, b, a, i)
 #        println("b $(pad(b)) + $(pad(s.s[2i+2]))")
         b = b + s.s[2i+2]
     end
@@ -238,7 +250,7 @@ function make_solve_r1_noro{W<:Unsigned}(::Type{W})
 		end
 		if ok
                     # pack final state
-                    s = State(ONE, W[s1, s2, s3, s4], rotate=false)
+                    s = State(ONE, W[s1, s2, s3, s4], rotate=NoRotation)
 		    println("result $s")
                     return s
 		else
@@ -395,7 +407,7 @@ function GA.breed{W<:Unsigned}(c::Context, s1::State{W}, s2::State{W})
     b1, b2 = min(b1, b2), max(b1, b2)
     # banded crossover - block of state for a range of bits
     m::W = 2^b2-1 - (2^b1-1)
-    State(s1.r, W[(s[1]&m)|(s[2]&~m) for s in zip(s1.s, s2.s)], rotate=false)
+    State(s1.r, W[(s[1]&m)|(s[2]&~m) for s in zip(s1.s, s2.s)], rotate=NoRotation)
 end
 
 function GA.mutate{W<:Unsigned}(c::Context, s::State{W})
@@ -443,7 +455,7 @@ function make_ga_noro{W<:Unsigned}(::Type{W}, r, k, len, limit, size, nchild)
     function solve(e)
         ptext = collect(Uint8, take(len, rands(Uint8)))
         ctext = collect(Uint8, e(ptext))
-        s = [State(W, r, collect(Uint8, take(k, rands(Uint8))), rotate=false)
+        s = [State(W, r, collect(Uint8, take(k, rands(Uint8))), rotate=NoRotation)
              for _ in 1:size]
         p = Population(Context(0, 0, 0, limit, ctext, ptext), s, nchild, Score)
         age, p = evolve(p)
@@ -502,7 +514,7 @@ function make_dfs_noro{W<:Unsigned}(::Type{W}, r, len)
         width::Uint, depth::Uint = 2r+2, 8*sizeof(W)
         U = uint_for_bits(width+1)  # extra bit for overflow
         U = Uint64  # faster than minimum size above (left in for error check)
-        state = State(convert(Uint, r), zeros(W, width), rotate=false)
+        state = State(convert(Uint, r), zeros(W, width), rotate=NoRotation)
         overflow::U, inc::U, start::U = 1 << width, one(U), zero(U)
         function inner(level)
             if level > depth
@@ -873,7 +885,7 @@ function make_cached_dfs_noro_r5{W<:Unsigned}(::Type{W}, table1, table2;
         end
 
         counter::Uint = ZERO
-        const state::State{W} = State(FIVE, zeros(W, WIDTH), rotate=false)
+        const state::State{W} = State(FIVE, zeros(W, WIDTH), rotate=NoRotation)
         function search(level::Int)
             # returns the level to which we must backtrack, or 0 on success
             backtrack::Int = 0
@@ -1038,7 +1050,7 @@ function make_cached_dfs_noro_r8{W<:Unsigned}(::Type{W}, table1, table2;
         end
 
         counter::Uint = ZERO
-        const state::State{W} = State(EIGHT, zeros(W, WIDTH), rotate=false)
+        const state::State{W} = State(EIGHT, zeros(W, WIDTH), rotate=NoRotation)
         function search(level::Int)
             # returns the level to which we must backtrack, or 0 on success
             backtrack::Int = 0
@@ -1101,7 +1113,8 @@ end
 Trace{W<:Unsigned}(header::String, ::Type{W}) = Trace{W}(header, nothing)
 
 
-function encrypt{W<:Unsigned}(s::State{W}, a::W, b::W, trace::Vector{Trace{W}})
+function encrypt{W<:Unsigned}(s::State{W, NoRotation}, 
+                              a::W, b::W, trace::Vector{Trace{W}})
 
     function apply(f, op::String, arg1::W, head1::Union(String, Nothing), 
                    arg2::W, head2::String, head3::String)
@@ -1146,18 +1159,12 @@ function encrypt{W<:Unsigned}(s::State{W}, a::W, b::W, trace::Vector{Trace{W}})
     a::W = add(a, "a", s.s[1], "s0")
     b::W = b + s.s[2]
 
-    for i in 1:s.r
+    for i in 0x1:s.r
 
         a = xor(a, b, "b", "a")
-        if s.rotate
-            a = rot(a, b, "b", "a")
-        end
         a = add(a, s.s[2i+1], "s$(2i)", "a")
 
         b = b $ a
-        if s.rotate
-            b = rotatel(b, a)
-        end
         b = b + s.s[2i+2]
 
     end
@@ -1246,7 +1253,7 @@ function prove_carry{W<:Unsigned}(::Type{W}, r::Uint8, s, nmax)
     n_strong, n_weak = 0, 0
     for i in 1:nmax
         state = State(W, r, collect(Uint8, take(s, rands(Uint8))), 
-                      rotate=false)
+                      rotate=NoRotation)
         a, b = collect(W, take(2, rands(W)))
         ap, bp = encrypt(state, a, b)
         a1, _ = encrypt(state, a $ one(W), b)
@@ -1279,7 +1286,7 @@ function prove_nonlinear{W<:Unsigned}(::Type{W}, r::Uint8, k, nmax)
     n_add, n_xor = 0, 0
     for i in 1:nmax
         state = State(W, r, collect(Uint8, take(k, rands(Uint8))), 
-                      rotate=false)
+                      rotate=NoRotation)
         a, b, c, d = collect(W, take(4, rands(W)))
         p, q = encrypt(state, convert(W, a+c), convert(W, b+d))
         rs1 = encrypt(state, a, b)
@@ -1304,9 +1311,9 @@ end
 
 # ---- validate solutions
 
-make_keygen(w, r, k; rotate=true) = 
+make_keygen(w, r, k; rotate=FullRotation) = 
 () -> State(w, r, collect(Uint8, take(k, rands(Uint8))), rotate=rotate)
-fake_keygen(w, r, k; rotate=true) = 
+fake_keygen(w, r, k; rotate=FullRotation) = 
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
@@ -1316,67 +1323,67 @@ function solutions()
                      k -> ptext -> encrypt(k, ptext), eq=same_state)
     # one rotation, exact back-calculation, 8 bits
     key_from_encrypt(3, make_solve_r1_noro(Uint8), 
-                     make_keygen(Uint8, 0x1, 0x2, rotate=false),
+                     make_keygen(Uint8, 0x1, 0x2, rotate=NoRotation),
                      k -> (a, b) -> encrypt(k, a, b), 
                      eq=same_ctext(16, encrypt))
     # one rotation, exact back-calculation, 32 bits
     key_from_encrypt(3, make_solve_r1_noro(Uint32), 
-                     make_keygen(Uint32, 0x1, 0x2, rotate=false),
+                     make_keygen(Uint32, 0x1, 0x2, rotate=NoRotation),
                      k -> (a, b) -> encrypt(k, a, b),
                      eq=same_ctext(16, encrypt))
     # tabulate first bit (only) in 8-bit table with 8-bit blocks
     ptext_from_encrypt(3, make_solve_lbits_noro(Uint8, 1, Uint8), 
-                       make_keygen(Uint8, 0x1, 0x2, rotate=false),
+                       make_keygen(Uint8, 0x1, 0x2, rotate=NoRotation),
                        k -> p -> encrypt(k, p), 16,
                        eq=same_ptext(Uint32, 1),
                        encrypt2=k -> (a, b) -> encrypt(k, a, b))
     # tabulate 9 bits in 16-bit table with 32-bit blocks
     ptext_from_encrypt(3, make_solve_lbits_noro(Uint16, 9, Uint32), 
-                       make_keygen(Uint32, 0x3, 0x10, rotate=false),
+                       make_keygen(Uint32, 0x3, 0x10, rotate=NoRotation),
                        k -> p -> encrypt(k, p), 32,
                        eq=same_ptext(Uint32, 9),
                        encrypt2=k -> (a, b) -> encrypt(k, a, b))
     # adaptive 8 bits, no rotation, 1 round
     ptext_from_encrypt(3, make_search_noro(Uint8), 
-                       make_keygen(Uint8, 0x1, 0x2, rotate=false),
+                       make_keygen(Uint8, 0x1, 0x2, rotate=NoRotation),
                        k -> p -> encrypt(k, p), 16,
                        eq=same_ptext(),
                        encrypt2=k -> (a, b) -> encrypt(k, a, b))
     # adaptive 32 bits, no rotation, 16 rounds
     ptext_from_encrypt(3, make_search_noro(Uint32), 
-                       make_keygen(Uint32, 0x10, 0x10, rotate=false),
+                       make_keygen(Uint32, 0x10, 0x10, rotate=NoRotation),
                        k -> p -> encrypt(k, p), 32,
                        eq=same_ptext(),
                        encrypt2=k -> (a, b) -> encrypt(k, a, b))
     # GA, 8 bits, no rotation, 2 rounds
 #    key_from_encrypt(1, make_ga_noro(Uint8, 0x2, 0x10, 256, 100000, 1000, 100),
-#                     make_keygen(Uint8, 0x2, 0x10, rotate=false),
+#                     make_keygen(Uint8, 0x2, 0x10, rotate=NoRotation),
 #                     k -> ptext -> encrypt(k, ptext), 
 #                     eq=same_ctext(256, encrypt))
     # GA, 32 bits, no rotation, 1 round
 #    key_from_encrypt(1, make_ga_noro(Uint32, 0x1, 0x10, 256, 100000, 1000, 100),
-#                     make_keygen(Uint32, 0x1, 0x10, rotate=false),
+#                     make_keygen(Uint32, 0x1, 0x10, rotate=NoRotation),
 #                     k -> ptext -> encrypt(k, ptext), 
 #                     eq=same_ctext(256, encrypt))
     # DFS, 8 bits, no rotation, 1 round
     key_from_encrypt(3, make_dfs_noro(Uint8, 0x1, 32),
-                     make_keygen(Uint8, 0x1, 0x10, rotate=false),
+                     make_keygen(Uint8, 0x1, 0x10, rotate=NoRotation),
                      k -> (a, b) -> encrypt(k, a, b), 
                      eq=same_ctext(64, encrypt))
     # DFS, 32 bits, no rotation, 4 rounds
     key_from_encrypt(1, make_dfs_noro(Uint32, 0x4, 32),
-                     make_keygen(Uint32, 0x4, 0x10, rotate=false),
+                     make_keygen(Uint32, 0x4, 0x10, rotate=NoRotation),
                      k -> (a, b) -> encrypt(k, a, b), 
                      eq=same_ctext(1024, encrypt))
     # DFS w table, 32 bits, no rotation, 5 rounds (~100 min)
     table1, table2 = precalc2()
     key_from_encrypt(1, make_cached_dfs_noro_r5(Uint32, table1, table2),
-                     fake_keygen(Uint32, 0x5, 0x10, rotate=false),
+                     fake_keygen(Uint32, 0x5, 0x10, rotate=NoRotation),
                      k -> (a, b) -> encrypt(k, a, b), 
                      eq=same_ctext(1024, encrypt))
     # DFS w table, 32 bits, no rotation, 8 rounds (does not complete)
 #    key_from_encrypt(1, make_cached_dfs_noro_r8(Uint32, table1, table2, period=10),
-#                     fake_keygen(Uint32, 0x8, 0x10, rotate=false),
+#                     fake_keygen(Uint32, 0x8, 0x10, rotate=NoRotation),
 #                     k -> (a, b) -> encrypt(k, a, b), 
 #                     eq=same_ctext(1024, encrypt))
 end
@@ -1385,9 +1392,9 @@ end
 # ---- tests
 
 function test_trace()
-    println(trace(State(Uint16, 0x3, zeros(Uint8, 16), rotate=false), 
+    println(trace(State(Uint16, 0x3, zeros(Uint8, 16), rotate=NoRotation), 
                   0x0000, 0x0000))
-    print_delta(State(Uint8, 0x3, zeros(Uint8, 16), rotate=false), 
+    print_delta(State(Uint8, 0x3, zeros(Uint8, 16), rotate=NoRotation), 
                 [(0x00, 0x00), (0x01, 0x00), (0x01, 0x02)])
 end
 
@@ -1443,7 +1450,7 @@ end
 
 function test_table1(table1)
     for ab in ZERO:THREE
-        state = State(convert(Uint, 0x2), zeros(Uint8, 6), rotate=false)
+        state = State(convert(Uint, 0x2), zeros(Uint8, 6), rotate=NoRotation)
         for s in ZERO:convert(Uint, 0x3f)
             set_state!(state, convert(Uint8, s), ONE)
             a, b = encrypt(state, convert(Uint8, ab & 0x1), convert(Uint8, ab & 0x2 >> 1))
@@ -1456,7 +1463,7 @@ end
 function test_table2(table1, table2)
     m = 0x3f00
     for ab in ZERO:THREE
-        state = State(convert(Uint, 0x5), zeros(Uint8, 12), rotate=false)
+        state = State(convert(Uint, 0x5), zeros(Uint8, 12), rotate=NoRotation)
         for s in ZERO:convert(Uint, 0xfff)
             set_state!(state, convert(Uint16, s), ONE)
             a, b = encrypt(state, convert(Uint8, ab & 0x1), convert(Uint8, ab & 0x2 >> 1))
@@ -1469,8 +1476,8 @@ function test_table2(table1, table2)
 end
 
 function test_cached_dfs_r5(table1, table2)
-#    s = State(FIVE, collect(Uint32, take(12, rands(Uint32))), rotate=false)
-    s = State(FIVE, zeros(Uint32, 12), rotate=false)
+#    s = State(FIVE, collect(Uint32, take(12, rands(Uint32))), rotate=NoRotation)
+    s = State(FIVE, zeros(Uint32, 12), rotate=NoRotation)
     s.s[1] = convert(Uint32, -1)
     s.s[2] = 0x55555555
     s.s[3] = convert(Uint32, -1)
@@ -1488,9 +1495,9 @@ function test_charsa()
     # RC5-32/5/0 0x s:bdc109eb2c4d40b078a6c1b9224815b00e4088f664d0a7ff6284c39566a8f3aa4639e5ac0858497200f318400038cc3f
     t1 = "1a3049ebb8d360b01df181b90540ddb0c1d240f6a41ce7ffd963eb95348d3baa13f1f5ac6a4389729dc4984014a6cc3f"
     t2 = "bdc109eb2c4d40b078a6c1b9224815b00e4088f664d0a7ff6284c39566a8f3aa4639e5ac0858497200f318400038cc3f"
-    s1 = State(Uint32, FIVE, t1, rotate=false)
+    s1 = State(Uint32, FIVE, t1, rotate=NoRotation)
     println("$t1\n$s1")
-    s2 = State(Uint32, FIVE, t2, rotate=false)
+    s2 = State(Uint32, FIVE, t2, rotate=NoRotation)
     println("$t2\n$s2")
     p = collect(Uint8, take(40, rands(Uint8)))
     c1 = collect(Uint8, encrypt(s1, p))
@@ -1532,6 +1539,6 @@ end
 
 
 tests()
-#solutions()
+solutions()
 
 end
