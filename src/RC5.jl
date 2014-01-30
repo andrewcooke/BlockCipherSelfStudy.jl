@@ -1112,62 +1112,84 @@ end
 
 Trace{W<:Unsigned}(header::String, ::Type{W}) = Trace{W}(header, nothing)
 
+Base.isequal{W<:Unsigned}(t1::Trace{W}, t2::Trace{W}) = 
+isequal(t1.header, t2.header) && isequal(t1.value, t2.value)
 
-function encrypt{W<:Unsigned}(s::State{W, NoRotation}, 
-                              a::W, b::W, trace::Vector{Trace{W}})
+
+function encrypt{W<:Unsigned, R<:Rotation}(s::State{W, R}, a::W, b::W,
+    trace::Vector{Trace{W}}; both=false)
+
+    blank = Trace(" ", W)
+    space() = push!(trace, blank)
+
+    function push_maybe(trace, t)
+        if length(trace) > 1 && trace[end] == blank && trace[end-1] == t
+            pop!(trace)
+        else
+            push!(trace, t)
+        end
+    end
 
     function apply(f, op::String, arg1::W, head1::Union(String, Nothing), 
                    arg2::W, head2::String, head3::String)
-        if head1 != nothing
-            push!(trace, Trace(head1, arg1))
-        end
+        
+        # re-use previous if possible for more compact display
+        push_maybe(trace, Trace(head1, arg1))
         push!(trace, Trace(op, W))
         push!(trace, Trace(head2, arg2))
         result::W = f(arg1, arg2)
-        push!(trace, Trace(" ", W))
+        space()
         push!(trace, Trace(head3, result))
+        space()
         result
     end
 
-    function add(arg1::W, head1::String, arg2::W, head2::String)
-        apply(+, "+", arg1, head1, arg2, head2, head1)
+    add(arg1::W, head1::String, arg2::W, head2::String) =
+    apply(+, "+", arg1, head1, arg2, head2, head1)
+
+    xor(arg1::W, head1::String, arg2::W, head2::String, head3::String) =
+    apply($, "x", arg1, head1, arg2, head2, head3)
+
+    rot(::Type{NoRotation}, arg1::W, head1::String, arg2::W, head2::String, i::Unsigned) =
+    arg1
+
+    function rot(::Type{RoundRotation}, arg1::W, head1::String, arg2::W, head2::String, i::Unsigned)
+        push_maybe(trace, Trace(head1, arg1))
+        push!(trace, Trace("^$(i)", W))
+        result::W = rotatel(arg1, i)
+        push!(trace, Trace(head1, result))
+        space()
+        result
     end
 
-    function add(arg1::W, arg2::W, head2::String, head3::String)
-        apply(+, "+", arg1, nothing, arg2, head2, head3)
-    end
-
-    function xor(arg1::W, head1::String, arg2::W, head2::String)
-        apply($, "x", arg1, head1, arg2, head2, head1)
-    end
-
-    function xor(arg1::W, arg2::W, head2::String, head3::String)
-        apply($, "x", arg1, nothing, arg2, head2, head3)
-    end
-
-    function rot(arg1::W, arg2::W, head2::String, head3::String)
-        apply(rotatel, "<", arg1, nothing, arg2, head2, head3)
-    end
-
-    function space()
-        push!(trace, Trace(" ", W))
-    end
+    rot(::Type{FullRotation}, arg1::W, head1::String, arg2::W, head2::String, i::Unsigned) =
+    apply(rotatel, "<", arg1, head1, arg2, head2, head1)
 
     push!(trace, Trace("b", b))
     space()
 
     a::W = add(a, "a", s.s[1], "s0")
-    b::W = b + s.s[2]
+    b::W = both ? add(b, "b", s.s[2], "s1") : b + s.s[2]
 
     for i in 0x1:s.r
 
-        a = xor(a, b, "b", "a")
-        a = add(a, s.s[2i+1], "s$(2i)", "a")
+        a = xor(b, "b", a, "a", "a")
+        a = rot(s.rotate, a, "a", b, "b", i)
+        a = add(a, "a", s.s[2i+1], "s$(2i)")
 
-        b = b $ a
-        b = b + s.s[2i+2]
+        if both
+            b = xor(a, "a", b, "b", "b")
+            b = rot(s.rotate, b, "b", a, "a", i)
+            b = add(b, "b", s.s[2i+2], "s$(2i+1)")
+        else
+            b = a $ b
+            b = rotatel(s.rotate, b, a, i)
+            b = b + s.s[2i+2]
+        end
 
     end
+
+    push_maybe(trace, Trace("a", a))
 
     a, b
 end
@@ -1204,9 +1226,9 @@ function format{W<:Unsigned}(trace::Vector{Trace{W}};
 end
 
 function trace{W<:Unsigned}(state::State{W}, a::W, b::W;
-                            title=true, range=1:0)
+                            title=true, range=1:0, both=false)
     t = Array(Trace{W}, 0)
-    encrypt(state, a, b, t)
+    encrypt(state, a, b, t, both=both)
     chars = format(t, title=title, range=range)
     return string(reshape(chars, length(chars))...)
 end
@@ -1228,10 +1250,10 @@ function diff(c1, c2)
 end
 
 function print_delta{W<:Unsigned}(state::State{W}, ab::Vector{(W,W)};
-                                  range=1:0)
+                                  range=1:0, both=false, chain=false)
     t = Array(Trace{W}, 0)
     a, b = ab[1]
-    encrypt(state, a, b, t)
+    encrypt(state, a, b, t, both=both)
     chars = format(t, title=true, range=range)
     println()
     println(string(reshape(chars, length(chars))...))
@@ -1239,9 +1261,13 @@ function print_delta{W<:Unsigned}(state::State{W}, ab::Vector{(W,W)};
     reference = format(t, title=false, range=range)
     for (a, b) in ab[2:end]
         u = Array(Trace{W}, 0)
-        encrypt(state, a, b, u)
-        d = diff(reference, format(u, title=false, range=range))
+        encrypt(state, a, b, u, both=both)
+        update = format(u, title=false, range=range)
+        d = diff(reference, update)
         println(string(reshape(d, length(d))...))
+        if chain
+            reference = update
+        end
     end
 end
 
@@ -1293,19 +1319,76 @@ function prove_nonlinear{W<:Unsigned}(::Type{W}, r::Uint8, k, nmax)
         rs2 = encrypt(state, c, d)
         r = convert(W, rs1[1] + rs2[1])
         s = convert(W, rs1[2] + rs2[2])
-        if p == r && q == s
+        if p == r || q == s
             n_add += 1
+            if p == r
+#                println("add $(bits(p))   $(bits(a)) $(bits(c))")
+            end
+            if q == s
+#                println("add $(bits(q))   $(bits(b)) $(bits(d))")
+            end
         end
         p, q = encrypt(state, a$c, b$d)
         rs1 = encrypt(state, a, b)
         rs2 = encrypt(state, c, d)
         r::W = rs1[1] $ rs2[1]
         s::W = rs1[2] $ rs2[2]
-        if p == r && q == s
+        if p == r || q == s
             n_xor += 1
+            if p == r
+#                println("xor $(bits(p))   $(bits(a)) $(bits(c))")
+            end
+            if q == s
+#                println("xor $(bits(q))   $(bits(b)) $(bits(d))")
+            end
         end        
     end
     println("linear count: $n_add / $n_xor")
+end
+
+
+# ---- probabilistic search
+
+function make_search_roundro{W<:Unsigned}(::Type{W}, r, width)
+
+    # with rotation we no longer have complete independence from lsb upawards.
+    # but perhaps it's still pretty good.  so let's try choosing whichever 
+    # value works most often for random b (when finding a).
+
+    function solve(ctext, e)
+        Task() do
+            top = 8*sizeof(W)
+            for (c, d) in group(2, pack(W, ctext))
+                a::W, b::W = zero(W), zero(W)
+                for bit in 1:top
+                    n::W = (one(W) << (bit - 1)) - one(W)
+                    m::W = (one(W) << min(bit + width - 1, top)) - one(W)
+                    mask::W = (one(W) << bit) - one(W)
+                    mask = rotatel(mask, convert(Uint, (r*(r+1))/2))
+                    println("$(bit) $r $(bits(mask))")
+                    best, a2, b2 = 0, zero(W), zero(W)
+                    for i::W in n:(n+1):m
+                        a1 = a | i
+                        for j::W in n:(n+1):m
+                            b1 = b | j
+                            c1, d1 = e(a1, b1)
+                            score = count_zeros((c1 $ c) & mask) + count_zeros((d1 $ d) & mask)
+                            if score > best
+                                println("$(bits(c)) $(bits(c1))")
+                                a2, b2 = a1, b1
+                                best = score
+                            end
+                        end
+                    end
+                    mask = one(W) << (bit - 1)
+                    a, b = a | (a2 & mask), b | (b2 & mask)
+                end
+                produce_from(unpack(W, a))
+                produce_from(unpack(W, b))
+            end
+        end
+    end
+
 end
 
 
@@ -1317,8 +1400,14 @@ fake_keygen(w, r, k; rotate=FullRotation) =
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
+    ptext_from_encrypt(3, make_search_roundro(Uint32, 1, 3), 
+                       make_keygen(Uint32, 0x1, 0x2, rotate=RoundRotation),
+                       k -> p -> encrypt(k, p), 16,
+                       eq=same_ptext(),
+                       encrypt2=k -> (a, b) -> encrypt(k, a, b))
+    return
     # no rotation and zero rounds 
-   key_from_encrypt(3, make_solve_r0(Uint32, 0x2), 
+    key_from_encrypt(3, make_solve_r0(Uint32, 0x2), 
                      make_keygen(Uint32, 0x0, 0x2),
                      k -> ptext -> encrypt(k, ptext), eq=same_state)
     # one rotation, exact back-calculation, 8 bits
@@ -1392,10 +1481,19 @@ end
 # ---- tests
 
 function test_trace()
+    @assert Trace{Uint8}("a", nothing) == Trace{Uint8}("a", nothing)
+    @assert Trace{Uint8}("a", 0x1) == Trace{Uint8}("a", 0x1)
+    @assert Trace{Uint8}("a", 0x2) != Trace{Uint8}("a", 0x1)
+    @assert Trace{Uint8}("a", 0x1) != Trace{Uint8}("b", 0x1)
     println(trace(State(Uint16, 0x3, zeros(Uint8, 16), rotate=NoRotation), 
                   0x0000, 0x0000))
     print_delta(State(Uint8, 0x3, zeros(Uint8, 16), rotate=NoRotation), 
                 [(0x00, 0x00), (0x01, 0x00), (0x01, 0x02)])
+    print_delta(State(Uint8, 0x3, zeros(Uint8, 16), rotate=RoundRotation), 
+                [(0x00, 0x00), 
+                 (0x01, 0x00), (0x03, 0x00), (0x07, 0x00), (0x0f, 0x00), 
+                 (0x1f, 0x00), (0x3f, 0x00), (0x7f, 0x00), (0xff, 0x00)], 
+                both=true, chain=true)
 end
 
 function test_rotatel()
@@ -1488,7 +1586,7 @@ function test_cached_dfs_r5(table1, table2)
 #    solve((a, b) -> encrypt(s, a, b))
 end
 
-function test_charsa()
+function test_chars()
     # test strange result
     # level 31  33 37 42 49 37 48 38 37 41 62 46 63 24 49 7 63 15 45 3 32 36 40 56 17 18 8 6 32 47 6 39 52 20 3 16 4 1 6 46 10 60 32 54 4 24 59 19 37 0 1 7 24 6 51 8 23 0 5 3 36
     # RC5-32/5/0 0x s:1a3049ebb8d360b01df181b90540ddb0c1d240f6a41ce7ffd963eb95348d3baa13f1f5ac6a4389729dc4984014a6cc3f
@@ -1532,13 +1630,14 @@ function tests()
     test_table1(table1)
     test_table2(table1, table2)
     test_cached_dfs_r5(table1, table2)
+    test_chars()
     test_trace()
     prove_carry(Uint8, 0x3, 2, 10000)
     prove_nonlinear(Uint8, 0x3, 2, 10000)
 end
 
 
-tests()
+#tests()
 solutions()
 
 end

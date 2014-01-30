@@ -52,16 +52,18 @@ function same_ptext{W<:Unsigned}(::Type{W}, nbits)
     # half blocks
     function eq(p1, p2)
         m::W = 2^nbits - 1
-        ok = true
+        count, n = 0, 0
         for (a::W, b::W) in zip(pack(W, p1), pack(W, p2))
 #            println("$(pad(a))/$(pad(a & m)) $(pad(b))/$(pad(b & m))")
-            ok = ok && a & m == b & m
+            count += count_ones((~(a $ b)) & m)
+            n += nbits
         end
-        ok
+        println("$count / $n = $(100*count/n)%")
+        return n == count
     end
 end
 
-same_ptext(W) = same_ptext(W, sizeof(W))
+same_ptext(W) = same_ptext(W, 8*sizeof(W))
 same_ptext() = same_ptext(Uint8)
 
 end
