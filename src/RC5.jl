@@ -1349,7 +1349,7 @@ end
 
 # ---- probabilistic search
 
-function make_search_roundro{W<:Unsigned}(::Type{W}, r, width)
+function make_search_roundro{W<:Unsigned}(::Type{W}, r; retry=8, bias=3)
 
     # even with rotation, a single input bit only affects a limited
     # range of output bits (for sufficiently wide half-blocks and 
@@ -1358,36 +1358,40 @@ function make_search_roundro{W<:Unsigned}(::Type{W}, r, width)
 
     function solve(ctext, e)
 
-        midpt = div(width, 2)
-        if midpt < 1
-            error("width too small")
-        end
-        width = 2 * midpt + 1
         n_bits = 8 * sizeof(W)
         l, o = one(W), zero(W)
-        n::W = convert(W, 2 ^ width - 1)
         offset = convert(Uint, r*(r-1)/2)
 
         Task() do
 
             for (c, d) in group(2, pack(W, ctext))
 
-                in_mask::W = (l << width) - l
-                out_mask::W = rotatel(in_mask, offset)
-                in_bit = l << (midpt - 1)
-                out_bit = rotatel(in_bit, offset)
-                a::W, b::W = zero(W), zero(W)
-                searching, shift = true, zero(Uint)
-                
-                while searching
+                midpt, searching, shift = 0, true, zero(Uint)
+                a::W, b::W = o, o
 
-                    best, a2, b2 = 0, o, o
+                while searching && midpt < n_bits / 2
+
+                    if shift % (retry * n_bits) == 0
+                        midpt += 1
+                        println("$midpt")
+                        width = 2 * midpt + 1
+                        n::W = convert(W, 2 ^ width - 1)
+                        in_mask::W = (l << width) - l
+                        out_mask::W = rotatel(in_mask, offset)
+                        in_bit::W = l << (midpt - 1)
+                        out_bit::W = rotatel(in_bit, offset)
+                    end
+
+                    best, a2::W, b2::W = 0, o, o
                     for i::W in o:n
                         a1::W = (a & ~in_mask) | rotatel(i, shift)
                         for j::W in o:n
                             b1::W = (b & ~in_mask) | rotatel(j, shift)
-                            c1, d1 = e(a1, b1)
-                            score = count_zeros((c1 $ c) & out_mask) + count_zeros((d1 $ d) & out_mask)
+                            c1::W, d1::W = e(a1, b1)
+                            score = (count_zeros((c1 $ c) & out_mask) +
+                                     count_zeros((d1 $ d) & out_mask))
+#                                     ((c1 $ c) & out_mask == 0 ? bias : 0) +
+#                                     ((d1 $ d) & out_mask == 0 ? bias : 0))
                             if score > best
                                 a2, b2 = a1, b1
                                 best = score
@@ -1400,6 +1404,10 @@ function make_search_roundro{W<:Unsigned}(::Type{W}, r, width)
                     c2, d2 = e(a, b)
                     searching = !(c2 == c && d2 == d)
                     shift += one(Uint)
+
+                    if !searching
+                        println("$shift / $width")
+                    end
                 end
 
                 produce_from(unpack(W, a))
@@ -1419,9 +1427,9 @@ fake_keygen(w, r, k; rotate=FullRotation) =
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
-    ptext_from_encrypt(3, make_search_roundro(Uint32, 1, 3), 
-                       make_keygen(Uint32, 0x1, 0x2, rotate=RoundRotation),
-                       k -> p -> encrypt(k, p), 16,
+    ptext_from_encrypt(3, make_search_roundro(Uint32, 4), 
+                       make_keygen(Uint32, 0x4, 0x2, rotate=RoundRotation),
+                       k -> p -> encrypt(k, p), 256,
                        eq=same_ptext(),
                        encrypt2=k -> (a, b) -> encrypt(k, a, b))
     return
