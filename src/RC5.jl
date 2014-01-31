@@ -1351,38 +1351,57 @@ end
 
 function make_search_roundro{W<:Unsigned}(::Type{W}, r, width)
 
-    # with rotation we no longer have complete independence from lsb upawards.
-    # but perhaps it's still pretty good.  so let's try choosing whichever 
-    # value works most often for random b (when finding a).
+    # even with rotation, a single input bit only affects a limited
+    # range of output bits (for sufficiently wide half-blocks and 
+    # sufficiently few rounds).  so we can search through the input
+    # bits that affect a single output (only).
 
     function solve(ctext, e)
+
+        midpt = div(width, 2)
+        if midpt < 1
+            error("width too small")
+        end
+        width = 2 * midpt + 1
+        n_bits = 8 * sizeof(W)
+        l, o = one(W), zero(W)
+        n::W = convert(W, 2 ^ width - 1)
+        offset = convert(Uint, r*(r-1)/2)
+
         Task() do
-            top = 8*sizeof(W)
+
             for (c, d) in group(2, pack(W, ctext))
+
+                in_mask::W = (l << width) - l
+                out_mask::W = rotatel(in_mask, offset)
+                in_bit = l << (midpt - 1)
+                out_bit = rotatel(in_bit, offset)
                 a::W, b::W = zero(W), zero(W)
-                for bit in 1:top
-                    n::W = (one(W) << (bit - 1)) - one(W)
-                    m::W = (one(W) << min(bit + width - 1, top)) - one(W)
-                    mask::W = (one(W) << bit) - one(W)
-                    mask = rotatel(mask, convert(Uint, (r*(r+1))/2))
-                    println("$(bit) $r $(bits(mask))")
-                    best, a2, b2 = 0, zero(W), zero(W)
-                    for i::W in n:(n+1):m
-                        a1 = a | i
-                        for j::W in n:(n+1):m
-                            b1 = b | j
+                searching, shift = true, zero(Uint)
+                
+                while searching
+
+                    best, a2, b2 = 0, o, o
+                    for i::W in o:n
+                        a1::W = (a & ~in_mask) | rotatel(i, shift)
+                        for j::W in o:n
+                            b1::W = (b & ~in_mask) | rotatel(j, shift)
                             c1, d1 = e(a1, b1)
-                            score = count_zeros((c1 $ c) & mask) + count_zeros((d1 $ d) & mask)
+                            score = count_zeros((c1 $ c) & out_mask) + count_zeros((d1 $ d) & out_mask)
                             if score > best
-                                println("$(bits(c)) $(bits(c1))")
                                 a2, b2 = a1, b1
                                 best = score
                             end
                         end
                     end
-                    mask = one(W) << (bit - 1)
-                    a, b = a | (a2 & mask), b | (b2 & mask)
+                    a, b = (a & ~in_bit) | (a2 & in_bit), (b & ~in_bit) | (b2 & in_bit)
+                    in_mask, in_bit = rotatel(in_mask, l), rotatel(in_bit, l)
+                    out_mask, out_bit = rotatel(out_mask, l), rotatel(out_bit, l)
+                    c2, d2 = e(a, b)
+                    searching = !(c2 == c && d2 == d)
+                    shift += one(Uint)
                 end
+
                 produce_from(unpack(W, a))
                 produce_from(unpack(W, b))
             end
