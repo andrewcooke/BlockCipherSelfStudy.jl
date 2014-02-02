@@ -1362,19 +1362,18 @@ function make_search_roundro{W<:Unsigned}(::Type{W}, r; retry=8, bias=3)
 
             for (c, d) in group(2, pack(W, ctext))
 
-                midpt, searching, shift = 0, true, zero(Uint)
+                width, searching, shift = 1, true, zero(Uint)
                 a::W, b::W = o, o
 
-                while searching && midpt < n_bits / 2
+                while searching && width < n_bits
 
                     if shift % (retry * n_bits) == 0
-                        midpt += 1
-                        println("$midpt")
-                        width = 2 * midpt + 1
+                        width += 1
+                        println("$width")
                         n::W = convert(W, 2 ^ width - 1)
                         in_mask::W = (l << width) - l
                         out_mask::W = rotatel(in_mask, offset)
-                        in_bit::W = l << (midpt - 1)
+                        in_bit::W = l
                         out_bit::W = rotatel(in_bit, offset)
                     end
 
@@ -1730,6 +1729,6 @@ end
 
 
 tests()
-#solutions()
+solutions()
 
 end
