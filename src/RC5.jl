@@ -1483,6 +1483,12 @@ fake_keygen(w, r, k; rotate=FullRotation) =
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
+    ptext_from_encrypt(3, make_search_roundro(Uint32, 6), 
+                       make_keygen(Uint32, 0x6, 0x2, rotate=RoundRotation),
+                       k -> p -> encrypt(k, p), 32,
+                       eq=same_ptext(),
+                       encrypt2=k -> (a, b) -> encrypt(k, a, b))
+    return
     # no rotation and zero rounds 
     key_from_encrypt(3, make_solve_r0(Uint32, 0x2), 
                      make_keygen(Uint32, 0x0, 0x2),
@@ -1724,7 +1730,7 @@ function tests()
     test_trace()
     prove_carry(Uint8, 0x3, 2, 10000)
     prove_nonlinear(Uint8, 0x3, 2, 10000)
-    test_influence(Uint32, 0x4)
+    test_influence(Uint32, 0x5)
 end
 
 

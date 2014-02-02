@@ -147,6 +147,31 @@ a way to relate "distant" bits without also considering key expansion.  But
 this may be my inexperience, or simply laziness (perhaps key expansion must be
 included).
 
+## RC5 With Rotation BY Round
+
+As above, but the first round rotation is 1 bit; the second 2 bits; etc.
+
+### Plaintext - 5 Rounds 
+
+The influence of the first 4 bits on a randomly chosen key, with 5 rounds, is
+shown below:
+
+```
+ 0 444433211111000>^<8766667666665665
+ 1 5444332211100000>^<866666667766565
+ 2 55545543322210010>^<87666666667666
+ 3 665654433332111000>^<8666766667666
+```
+
+The output bit marked with `> <` is at `r(r+1)/2` - the cumulative shift
+position - and most influenced (`^`) by changing the input.
+
+Clearly the influence of each bot is restricted to a a range of output bits at
+and "above" the rotation.  So we can try using a search over a limited number
+of bits.
+
+This works well to ~5 rounds.
+
 
 <!--
 [![Build Status](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl.png)](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl)
