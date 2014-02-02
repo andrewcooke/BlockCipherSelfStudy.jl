@@ -147,9 +147,9 @@ a way to relate "distant" bits without also considering key expansion.  But
 this may be my inexperience, or simply laziness (perhaps key expansion must be
 included).
 
-## RC5 With Rotation BY Round
+## RC5 With Rotation By Round
 
-As above, but the first round rotation is 1 bit; the second 2 bits; etc.
+As above, but the first round rotation is 1 bit; the second round 2 bits; etc.
 
 ### Plaintext - 5 Rounds 
 
@@ -166,11 +166,9 @@ shown below:
 The output bit marked with `> <` is at `r(r+1)/2` - the cumulative shift
 position - and most influenced (`^`) by changing the input.
 
-Clearly the influence of each bot is restricted to a a range of output bits at
+Clearly the influence of each bit is restricted to a a range of output bits at
 and "above" the rotation.  So we can try using a search over a limited number
 of bits.
-
-This works well to ~5 rounds.
 
 
 <!--
