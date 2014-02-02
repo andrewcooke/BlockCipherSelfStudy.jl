@@ -594,10 +594,6 @@ function set{W<:Unsigned}(word::W, bit::Int, value::W, len::Int)
     return (word & ~mask) | ((value << bit) & mask)
 end
 
-function get{W<:Unsigned}(word::W, bit::Int)
-    return (word >> (bit - 1)) & one(W)
-end
-
 # any way to have compact literal Uint apart from this?!
 const ZERO = zero(Uint)
 const ONE = one(Uint)
@@ -1347,7 +1343,7 @@ function prove_nonlinear{W<:Unsigned}(::Type{W}, r::Uint8, k, nmax)
 end
 
 
-# ---- probabilistic search
+# ---- local search
 
 function make_search_roundro{W<:Unsigned}(::Type{W}, r; retry=8, bias=3)
 
@@ -1360,7 +1356,7 @@ function make_search_roundro{W<:Unsigned}(::Type{W}, r; retry=8, bias=3)
 
         n_bits = 8 * sizeof(W)
         l, o = one(W), zero(W)
-        offset = convert(Uint, r*(r-1)/2)
+        offset = convert(Uint, r*(r+1)/2)
 
         Task() do
 
@@ -1419,6 +1415,67 @@ function make_search_roundro{W<:Unsigned}(::Type{W}, r; retry=8, bias=3)
 end
 
 
+# to improve local search we need a more accurate idea of what output bits
+# are affected by what input
+
+function tabulate_influence{W<:Unsigned}(::Type{W}, r, e; n=100)
+    width = 8 * sizeof(W)
+    # output bit posn -> input bit posn -> number of times output changed
+    # (bits are 1-indexed)
+    influence::Array{Dict{Int,Int}} = [(Int=>Int)[] for _ in 1:width]
+    for _ in 1:n
+        a, b = take(2, rands(W))
+        c, d = e(a, b)
+        for input in 1:width
+            for x in 1:3
+                bit = one(W) << (input-1)
+                a1 = x & 1 != 0 ? a : a $ bit
+                b1 = x & 2 != 0 ? b : b $ bit
+                for changed in map(x -> x[1] $ x[2], zip(e(a1, b1), (c, d)))
+                    for output in 1:width
+                        if changed & 1 != 0
+                            m = influence[input]
+                            m[output] = get(m, output, 0) + 1
+                        end
+                        changed = changed >> 1
+                    end
+                end
+            end
+        end
+    end
+    influence
+end
+
+
+function print_influence(influence, r)
+    width = length(influence)
+    offset = convert(Int, r * (r+1) / 2)
+    for input in 1:width
+        @printf("%2d ", input-1)
+        m = influence[input]
+        biggest = maximum(values(m))
+        for output in 1:width
+            if output % width == (input + offset) % width
+                print(">")
+            end
+            value = get(m, output, 0)
+            if value == 0
+                print("-")
+            elseif value == biggest
+                print("^")
+            else
+                @printf("%d", floor(10 * value / biggest))
+            end
+            if output % width == (input + offset) % width
+                print("<")
+            end
+        end
+        print("\n")
+    end
+end
+
+
+
 # ---- validate solutions
 
 make_keygen(w, r, k; rotate=FullRotation) = 
@@ -1427,12 +1484,6 @@ fake_keygen(w, r, k; rotate=FullRotation) =
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
-    ptext_from_encrypt(3, make_search_roundro(Uint32, 4), 
-                       make_keygen(Uint32, 0x4, 0x2, rotate=RoundRotation),
-                       k -> p -> encrypt(k, p), 256,
-                       eq=same_ptext(),
-                       encrypt2=k -> (a, b) -> encrypt(k, a, b))
-    return
     # no rotation and zero rounds 
     key_from_encrypt(3, make_solve_r0(Uint32, 0x2), 
                      make_keygen(Uint32, 0x0, 0x2),
@@ -1502,6 +1553,12 @@ function solutions()
 #                     fake_keygen(Uint32, 0x8, 0x10, rotate=NoRotation),
 #                     k -> (a, b) -> encrypt(k, a, b), 
 #                     eq=same_ctext(1024, encrypt))
+    # local search
+    ptext_from_encrypt(3, make_search_roundro(Uint32, 3), 
+                       make_keygen(Uint32, 0x3, 0x2, rotate=RoundRotation),
+                       k -> p -> encrypt(k, p), 32,
+                       eq=same_ptext(),
+                       encrypt2=k -> (a, b) -> encrypt(k, a, b))
 end
 
 
@@ -1648,6 +1705,13 @@ function test_chars()
     end
 end
 
+function test_influence{W<:Unsigned}(::Type{W}, r; k=16)
+    s = State(W, r, collect(Uint8, take(k, rands(Uint8))), rotate=RoundRotation)
+    e = (a, b) -> encrypt(s, a, b)
+    print_influence(tabulate_influence(W, r, e), r)
+end
+
+
 function tests()
     test_rotatel()
     test_vectors()
@@ -1661,10 +1725,11 @@ function tests()
     test_trace()
     prove_carry(Uint8, 0x3, 2, 10000)
     prove_nonlinear(Uint8, 0x3, 2, 10000)
+    test_influence(Uint32, 0x4)
 end
 
 
-#tests()
-solutions()
+tests()
+#solutions()
 
 end
