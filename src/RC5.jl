@@ -1483,8 +1483,8 @@ fake_keygen(w, r, k; rotate=FullRotation) =
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
-    ptext_from_encrypt(3, make_search_roundro(Uint32, 6), 
-                       make_keygen(Uint32, 0x6, 0x2, rotate=RoundRotation),
+    ptext_from_encrypt(3, make_search_roundro(Uint32, 5), 
+                       make_keygen(Uint32, 0x5, 0x2, rotate=RoundRotation),
                        k -> p -> encrypt(k, p), 32,
                        eq=same_ptext(),
                        encrypt2=k -> (a, b) -> encrypt(k, a, b))
