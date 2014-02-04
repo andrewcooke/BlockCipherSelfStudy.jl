@@ -153,6 +153,8 @@ As above, but the first round rotation is 1 bit; the second round 2 bits; etc.
 
 ### Plaintext - 5 Rounds 
 
+An adaptive attacck, searching for the plaintext.
+
 The influence of the first 4 bits on a randomly chosen key, with 5 rounds, is
 shown below:
 
