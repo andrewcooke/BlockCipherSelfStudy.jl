@@ -1345,7 +1345,11 @@ end
 
 # ---- local search
 
-function make_search_roundro{W<:Unsigned}(::Type{W}, r; retry=8, bias=3)
+function common_bits{W<:Unsigned}(a::W, b::W, mask::W)
+    return count_zeros(((a $ b) & mask) | ~mask)
+end
+
+function make_search_roundro{W<:Unsigned}(::Type{W}, r; retry=2, bias=4)
 
     # even with rotation, a single input bit only affects a limited
     # range of output bits (for sufficiently wide half-blocks and 
@@ -1362,8 +1366,9 @@ function make_search_roundro{W<:Unsigned}(::Type{W}, r; retry=8, bias=3)
 
             for (c, d) in group(2, pack(W, ctext))
 
-                width, searching, shift = 1, true, zero(Uint)
+                width, searching, shift = 0, true, zero(Uint)
                 a::W, b::W = o, o
+                c2, d2 = e(a, b)
 
                 while searching && width < n_bits
 
@@ -1373,30 +1378,50 @@ function make_search_roundro{W<:Unsigned}(::Type{W}, r; retry=8, bias=3)
                         n::W = convert(W, 2 ^ width - 1)
                         in_mask::W = (l << width) - l
                         out_mask::W = rotatel(in_mask, offset)
-                        in_bit::W = l
+                        in_bit::W = l << (width - 1)
                         out_bit::W = rotatel(in_bit, offset)
                     end
 
-                    best, a2::W, b2::W = 0, o, o
-                    for i::W in o:n
-                        a1::W = (a & ~in_mask) | rotatel(i, shift)
-                        for j::W in o:n
-                            b1::W = (b & ~in_mask) | rotatel(j, shift)
-                            c1::W, d1::W = e(a1, b1)
-                            score = (count_zeros((c1 $ c) & out_mask) +
-                                     count_zeros((d1 $ d) & out_mask))
-#                                     ((c1 $ c) & out_mask == 0 ? bias : 0) +
-#                                     ((d1 $ d) & out_mask == 0 ? bias : 0))
-                            if score > best
-                                a2, b2 = a1, b1
-                                best = score
+                    if c2 & out_bit != c & out_bit || d2 & out_bit != d & out_bit
+
+                        best, a2::W, b2::W, escape = 0, o, o, false
+                    
+                        for i::W in o:n
+                            a1::W = (a & ~in_mask) | rotatel(i, shift)
+                            for j::W in o:n
+                                b1::W = (b & ~in_mask) | rotatel(j, shift)
+                                c1::W, d1::W = e(a1, b1)
+                                score = (bias * bias * bias * common_bits(c1, c, out_bit) +
+                                         bias * bias * bias * common_bits(d1, d, out_bit) +
+                                         bias * bias * common_bits(c1, c, out_mask & ~out_bit) +
+                                         bias * bias * common_bits(d1, d, out_mask & ~out_bit) +
+                                         bias * common_bits(a1, a, in_mask) +
+                                         bias * common_bits(b1, b, in_mask) +
+                                         common_bits(c1, c, ~out_mask) + 
+                                         common_bits(d1, d, ~out_mask))
+                                if score > best
+                                    a2, b2 = a1, b1
+                                    best = score
+                                end
                             end
                         end
+#                        a, b = (a & ~in_bit) | (a2 & in_bit), (b & ~in_bit) | (b2 & in_bit)
+#                        a, b = (a & ~in_mask) | (a2 & in_mask), (b & ~in_mask) | (b2 & in_mask)
+                        println()
+                        println("a:$(bin(a, n_bits)) b:$(bin(b, n_bits))")
+                        println("2:$(bin(a2, n_bits)) 2:$(bin(b2, n_bits))  $(best)")
+                        println("  $(bin(in_mask, n_bits))   $(bin(in_mask, n_bits))  $(shift % n_bits)")
+                        println("  $(bin(in_bit, n_bits))   $(bin(in_bit, n_bits))")
+                        a, b = a2, b2
+                        c2, d2 = e(a, b)
+                        println("c:$(bin(c, n_bits)) d:$(bin(d, n_bits))")
+                        println("2:$(bin(c2, n_bits)) p:$(bin(d2, n_bits))")
+                        println("  $(bin(out_mask, n_bits))   $(bin(out_mask, n_bits))  $(offset)")
+                        println("  $(bin(out_bit, n_bits))   $(bin(out_bit, n_bits))")
                     end
-                    a, b = (a & ~in_bit) | (a2 & in_bit), (b & ~in_bit) | (b2 & in_bit)
+
                     in_mask, in_bit = rotatel(in_mask, l), rotatel(in_bit, l)
                     out_mask, out_bit = rotatel(out_mask, l), rotatel(out_bit, l)
-                    c2, d2 = e(a, b)
                     searching = !(c2 == c && d2 == d)
                     shift += one(Uint)
 
@@ -1716,6 +1741,23 @@ function test_influence{W<:Unsigned}(::Type{W}, r; k=16)
     print_influence(tabulate_influence(W, r, e), r)
 end
 
+function test_common_bits()
+    @assert 1 == common_bits(0x000000001, 0x000000001, 0x000000001)
+    @assert 2 == common_bits(0x000000001, 0x000000001, 0x000000011)
+    @assert 1 == common_bits(0x000000011, 0x000000001, 0x000000011)
+    @assert 0 == common_bits(0x000000010, 0x000000001, 0x000000011)
+end
+
+function test_local_search(r)
+    s = State(Uint32, r, zeros(Uint8, 8), rotate=RoundRotation)
+    e = (a, b) -> encrypt(s, a, b)
+    search = make_search_roundro(Uint32, r)
+    ptext = b"hello world xxxx"  # exact number of blocks
+    ctext = encrypt(s, ptext)
+    result = collect(Uint8, search(ctext, e))
+    @assert result == ptext
+end
+
 
 function tests()
     test_rotatel()
@@ -1731,6 +1773,10 @@ function tests()
     prove_carry(Uint8, 0x3, 2, 10000)
     prove_nonlinear(Uint8, 0x3, 2, 10000)
     test_influence(Uint32, 0x5)
+    test_influence(Uint32, 0x6)
+    test_common_bits()
+    test_local_search(0x5)
+#    test_local_search(0x6)
 end
 
 

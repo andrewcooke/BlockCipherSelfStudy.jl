@@ -164,12 +164,15 @@ shown below:
 ```
 
 The output bit marked with `> <` is at `r(r+1)/2` - the cumulative shift
-position - and most influenced (`^`) by changing the input.
+position - and most influenced (`^`; digits are 10% units relative to the
+peak) by changing the input.
 
 Clearly the influence of each bit is restricted to a a range of output bits at
-and "above" the rotation.  So we can try using a search over a limited number
-of bits.
+and "above" the rotation.  So for each ciphertext character we can try using a
+search over a limited number of bits.
 
+In practice many character / key combinations can be found at 5 rounds, but
+not at 6.
 
 <!--
 [![Build Status](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl.png)](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl)
