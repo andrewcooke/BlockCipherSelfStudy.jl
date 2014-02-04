@@ -1372,6 +1372,10 @@ function make_search_roundro{W<:Unsigned}(::Type{W}, r; retry=2, bias=4)
 
                 while searching && width < n_bits
 
+                    # in_bit is the top-most bit of the range being searched;
+                    # it is rotated to out_bit.  in_mask and out_mask are the
+                    # enire range.
+
                     if shift % (retry * n_bits) == 0
                         width += 1
                         println("$width")
@@ -1381,6 +1385,8 @@ function make_search_roundro{W<:Unsigned}(::Type{W}, r; retry=2, bias=4)
                         in_bit::W = l << (width - 1)
                         out_bit::W = rotatel(in_bit, offset)
                     end
+
+                    # search wherever the target bit is incorrect
 
                     if c2 & out_bit != c & out_bit || d2 & out_bit != d & out_bit
 
