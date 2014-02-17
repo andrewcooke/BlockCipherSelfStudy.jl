@@ -141,11 +141,11 @@ b a+s axb a+s axb a+s axb a+s a
   1   1   1   0 0       1 1   1
 ```
 
-At the same time, my limited understanding of linear and differential attacks
-suggests that RC5 wihout rotation is, in a sense, "too linear".  I can't find
-a way to relate "distant" bits without also considering key expansion.  But
-this may be my inexperience, or simply laziness (perhaps key expansion must be
-included).
+At the same time, my limited understanding of linear and differential
+attacks suggests that RC5 without rotation is, in a sense, "too
+linear".  I can't find a way to relate "distant" bits without also
+considering key expansion.  But this may be my inexperience, or simply
+laziness (perhaps key expansion must be included).
 
 ## RC5 With Rotation By Round
 

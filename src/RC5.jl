@@ -3,8 +3,8 @@ module RC5
 using Blocks, Solve, Tasks, Debug, GA
 
 
-# this includes a definition of RC5 (with and without rotation, but no
-# decryption, currently) and an implementation of the following attacks:
+# RC5 (with and without rotation, but no decryption, currently) and an
+# implementation of the following attacks:
 #
 # - derivation of internal state using adaptive plaintext for 0 rounds
 #   and no rotation
