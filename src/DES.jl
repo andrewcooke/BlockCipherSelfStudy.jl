@@ -2,9 +2,11 @@
 module DES
 using Tasks, Solve
 
+
 abstract SBox
 type WithSBox <: SBox end
 type WithoutSBox <: SBox end
+
 
 immutable State{S<:SBox}
     r::Uint8
@@ -16,14 +18,13 @@ end
 State{S<:SBox}(key::Uint64; r::Uint8=0x10, sbox::Type{S}=WithSBox) = 
 State{S}(r, key, expand_key(r, key), sbox)
 
+
 function expand_key(r::Uint8, key::Uint64)
-    println(bin(key))
     k56 = permute_bits(key, 64, 56,
                        [57, 49, 41, 33, 25, 17,  9,  1, 58, 50, 42, 34, 26, 18,
                         10,  2, 59, 51, 43, 35, 27, 19, 11,  3, 60, 52, 44, 36,
                         63, 55, 47, 39, 31, 23, 15,  7, 62, 54, 46, 38, 30, 22,
                         14,  6, 61, 53, 45, 37, 29, 21, 13,  5, 28, 20, 12,  4])
-    println(bin(k56))
     c, d = split_28(k56)
     k = Array(Uint64, 0)
     for n in take(r, chain([1, 1, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1]))
@@ -31,7 +32,6 @@ function expand_key(r::Uint8, key::Uint64)
             c, d = rotatel_28(c), rotatel_28(d)
         end
         k56 = join_28(c, d)
-        println(bin(k56))
         push!(k, permute_bits(k56, 56, 48,
                               [14, 17, 11, 24,  1,  5,  3, 28, 15,  6, 21, 10,
                                23, 19, 12,  4, 26,  8, 16,  7, 27, 20, 13,  2,
@@ -40,6 +40,28 @@ function expand_key(r::Uint8, key::Uint64)
     end
     k
 end
+
+
+function encrypt{S<:SBox}(s::State{S}, p::Uint64)
+    p = permute_bits(p, 
+                     [58, 50, 42, 34, 26, 18, 10,  2, 60, 52, 44, 36, 28, 20, 12,  4,
+                      62, 54, 46, 38, 30, 22, 14,  6, 64, 56, 48, 40, 32, 24, 16,  8,
+                      57, 49, 41, 33, 25, 17,  9,  1, 59, 51, 43, 35, 27, 19, 11,  3,
+                      61, 53, 45, 37, 29, 21, 13,  5, 63, 55, 47, 39, 31, 23, 15,  7])
+    l::Uint32, r::Uint32 = split_32(p)
+    for i in 1:s.r
+        if i > 1
+            l, r = r, l
+        end
+        l = l $ f(r)
+    end
+    permute_bits(join_32(l, r),
+                 [40,  8, 48, 16, 56, 24, 64, 32, 39,  7, 47, 15, 55, 23, 63, 31,
+                  38,  6, 46, 14, 54, 22, 62, 30, 37,  5, 45, 13, 53, 21, 61, 29,
+                  36,  4, 44, 12, 52, 20, 60, 28, 35,  3, 43, 11, 51, 19, 59, 27,
+                  34,  2, 42, 10, 50, 18, 58, 26, 33,  1, 41,  9, 49, 17, 57, 25])
+end
+
 
 # perm is 1-based index from msb(!)
 function permute_bits{U<:Unsigned}(in::U, from, to, perm)
@@ -56,20 +78,26 @@ end
 permute_bits{U<:Unsigned}(in::U, from, perm) = permute_bits(in, from, from, perm)
 permute_bits{U<:Unsigned}(in::U, perm) = permute_bits(in, 8*sizeof(U), perm)
 
-const MASK_28 = (one(Uint64) << 28) - 1
+
+mask(n) = (one(Uint64) << n) - 1
+const MASK_28 = mask(28)
+const MASK_32 = mask(32)
+
+split_28(k::Uint64) = (k >> 28 & MASK_28, k & MASK_28)
+split_32(k::Uint64) = (convert(Uint32, k >> 32 & MASK_32), convert(Uint32, k & MASK_32))
  
-function split_28(k56::Uint64)
-    k56 >> 28 & MASK_28, k56 & MASK_28
-end
+join_28(c::Uint64, d::Uint64) = c << 28 | d
+join_32(c::Uint32, d::Uint32) = convert(Uint64, c) << 32 | d
 
-function join_28(c::Uint64, d::Uint64)
-    c << 28 | d
-end
+rotatel_28(n::Uint64) = MASK_28 & (n << 1 | n >>> 27)
 
-function rotatel_28(n::Uint64)
-    MASK_28 & (n << 1 | n >>> 27)
-end
 
+function test_encrypt()
+    z = State(0x0123456789abcdef, r=0x0)
+    for r1 in take(10, rands(Uint64))
+        @assert r1 == encrypt(z, r1)
+    end
+end
 
 function test_permutation()
     for r1 in take(10, rands(Uint8))
@@ -90,6 +118,7 @@ end
 function tests()
     test_permutation()
     test_schedule()
+    test_encrypt()
 end
 
 tests()
