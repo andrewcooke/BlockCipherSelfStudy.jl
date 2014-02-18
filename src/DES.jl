@@ -62,8 +62,9 @@ function expand_key(r::Uint8, key::Uint64)
 end
 
 
-function f(r::Uint32, k::Uint32, sbox)
+function f(r::Uint32, k48::Uint64, sbox)
     r48::Uint64 = permute_bits(convert(Uint64, r), 32, 48, EXPANSION)
+    r48 = r48 $ k48
     
     permute_bits(r, PBOX)
 end
