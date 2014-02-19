@@ -1,30 +1,44 @@
 
 module Assert
-export assert3
+export @assert3, @assert3f
 
 # if the expression has 3 parts then it is assumed to be similar to
 # 'left == right' and the leftand right halves will be evaluated and
-# displayed on failure.  otherwise, behaviour as for @assert
+# displayed on failure.
 macro assert3(expr)
-    # the $(report(...)) delays evaluation until failure
-    :($expr ? nothing : error("Assertion failed: ", $(report(expr))))
+    doassert(string, expr)
 end
 
-function report(expr)
-    if length(expr.args) != 3
-        return string(expr)
-    else
-        left = eval(expr.args[1])
-        right = eval(expr.args[3])
-        return "$(left) [!$(expr.args[2])] $(right)"
-    end
+# as above, but with a function that is used to format results 
+# (for example, hex would hexify numerical values).
+macro assert3f(fmt, expr)
+    doassert(fmt, expr)
 end
+
+function doassert(fmt, expr)
+    if length(expr.args) != 3
+        error("Expected $expr to contain 3 components")
+    end
+    :($(esc(expr)) ? nothing : error("Assertion failed: ",
+                                     $fmt($(esc(expr.args[1]))), 
+                                    " [!",
+                                     string($(esc(expr.args[2]))), 
+                                     "] ",
+                                     $fmt($(esc(expr.args[3])))))
+end
+
+
 
 function tests()
-    @assert3 1 == 1    # succeeeds
-    @assert3 1 == 1+1  # prints 1 [!==] 2
+    function noisy1()
+        println("called!")
+        return 1
+    end
+    @assert3 1 == 1           # succeeeds
+    println("runtime")
+    @assert3 1 == 1+noisy1()  # prints 1 [!==] 2
 end
 
-tests()
+#tests()
 
 end

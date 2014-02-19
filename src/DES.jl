@@ -1,6 +1,6 @@
 
 module DES
-using Tasks, Solve
+using Tasks, Solve, Assert
 
 
 # An implementation of DES.  Encryption only, and not very efficient.
@@ -173,7 +173,7 @@ function test_encrypt()
     end
     # http://cryptomanager.com/tv.html
     s = State(0x752878397493CB70)
-    @assert encrypt(s, 0x1122334455667788) == 0xB5219EE81AA7499D
+    @assert3f hex encrypt(s, 0x1122334455667788) == 0xB5219EE81AA7499D
 end
 
 function test_permutation()
