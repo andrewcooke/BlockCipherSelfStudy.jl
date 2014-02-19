@@ -129,7 +129,6 @@ function f(r::Uint32, k48::Uint64, ::Type{WithoutSBox})
 end
 
 function encrypt{S<:SBox}(s::State{S}, p::Uint64)
-    println("encrypt")
     p = permute_bits(p, INITIAL)
     l::Uint32, r::Uint32 = split_32(p)
     for i in 1:s.r
