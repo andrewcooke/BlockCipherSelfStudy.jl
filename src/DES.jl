@@ -127,6 +127,7 @@ function expand_key(r::Uint8, key::Uint64)
     k
 end
 
+
 circlify(n, val) = val << 1 | val >>> (n-1) | val << (n+1)
 
 function f(r::Uint32, k48::Uint64, ::Type{WithSBox})
