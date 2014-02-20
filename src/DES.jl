@@ -197,6 +197,7 @@ function test_encrypt()
     # http://cryptomanager.com/tv.html
     s = State(0x752878397493CB70)
     @assert3f hex encrypt(s, 0x1122334455667788) == 0xB5219EE81AA7499D
+    @assert3f hex encrypt(s, 0x99aabbccddeeff00) == 0x2196687E13973856
 end
 
 function test_permutation()
