@@ -88,6 +88,31 @@ SBOX[:,:,8] = [13  2  8  4  6 15 11  1 10  9  3 14  5  0 12  7;
                 2  1 14  7  4 10  8 13 15 12  9  0  3  5  6 11]'
 
 
+# perm is 1-based index from msb(!)
+function permute_bits{U<:Unsigned}(in::U, from, to, perm)
+    out::U = zero(U)
+    mask::U = one(U) << (to - 1)
+    for p in perm
+        if in & (one(U) << (from - p)) != 0
+            out = out | mask
+        end
+        mask = mask >>> 1
+    end
+    out
+end
+permute_bits{U<:Unsigned}(in::U, from, perm) = permute_bits(in, from, from, perm)
+permute_bits{U<:Unsigned}(in::U, perm) = permute_bits(in, 8*sizeof(U), perm)
+
+
+split_28(k::Uint64) = (k >> 28 & MASK_28, k & MASK_28)
+split_32(k::Uint64) = (convert(Uint32, k >> 32 & MASK_32), convert(Uint32, k & MASK_32))
+ 
+join_28(c::Uint64, d::Uint64) = c << 28 | d
+join_32(c::Uint32, d::Uint32) = convert(Uint64, c) << 32 | d
+
+rotatel_28(n::Uint64) = MASK_28 & (n << 1 | n >>> 27)
+
+
 function expand_key(r::Uint8, key::Uint64)
     k56 = permute_bits(key, 64, 56, KEY)
     c, d = split_28(k56)
@@ -143,31 +168,6 @@ function encrypt{S<:SBox}(s::State{S}, p::Uint64)
     end
     permute_bits(join_32(l, r), FINAL)
 end
-
-
-# perm is 1-based index from msb(!)
-function permute_bits{U<:Unsigned}(in::U, from, to, perm)
-    out::U = zero(U)
-    mask::U = one(U) << (to - 1)
-    for p in perm
-        if in & (one(U) << (from - p)) != 0
-            out = out | mask
-        end
-        mask = mask >>> 1
-    end
-    out
-end
-permute_bits{U<:Unsigned}(in::U, from, perm) = permute_bits(in, from, from, perm)
-permute_bits{U<:Unsigned}(in::U, perm) = permute_bits(in, 8*sizeof(U), perm)
-
-
-split_28(k::Uint64) = (k >> 28 & MASK_28, k & MASK_28)
-split_32(k::Uint64) = (convert(Uint32, k >> 32 & MASK_32), convert(Uint32, k & MASK_32))
- 
-join_28(c::Uint64, d::Uint64) = c << 28 | d
-join_32(c::Uint32, d::Uint32) = convert(Uint64, c) << 32 | d
-
-rotatel_28(n::Uint64) = MASK_28 & (n << 1 | n >>> 27)
 
 
 function test_encrypt()
