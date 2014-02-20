@@ -102,28 +102,51 @@ function expand_key(r::Uint8, key::Uint64)
     k
 end
 
+function bin8{U<:Unsigned}(val::U; n=0)
+    n = n == 0 ? 8 * sizeof(U) : n
+    s = bin(val)
+    while length(s) < n
+        s = "0$s"
+    end
+    if length(s) > n
+        s = s[end-n+1:end]
+    end
+    w = ""
+    while length(s) > 0
+        l = min(length(s), 8)
+        w = "$(s[end-l+1:end]) $w"
+        s = s[1:end-l]
+    end
+    w
+end
+
+circlify(n, val) = val << 1 | val >>> (n-1) | val << (n+1)
 
 function f(r::Uint32, k48::Uint64, ::Type{WithSBox})
     out::Uint32 = zero(Uint32)
-    # circlify to simplify later slicing
     w::Uint64 = convert(Uint64, r)
-    w = w << 1 | w >> 31 | w << 33
+    # the "expansion permutation" is equivalent to using a sliding window
+    # along a circularly repeating value, shifting 4 digits each time
+    w = circlify(32, w) << 14
     for i in 1:8
-        in = MASK_6 & (w $ k48)
-        w, k48 = w >>> 5, k48 >>> 6
-        row, col = MASK_2 & (w << 1 | w >>> 5), MASK_4 & w >>> 1
+        # process the top-most 6 bits
+        in = MASK_6 & ((w $ k48) >> 42)
+#        println(bin8(in, n=6))
+        row = ((in >> 4) & 0x2) | (in & 0x1)
+        col = MASK_4 & (in >>> 1)
         out = (out << 4) | SBOX[col+1,row+1,i]
+        w, k48 = w << 4, k48 << 6
     end
     permute_bits(out, PBOX)
 end
 
 function f(r::Uint32, k48::Uint64, ::Type{WithoutSBox})
     out::Uint32 = zero(Uint32)
-    # shift to simplify loop
-    k48::Uint64 = k48 >>> 1
+    w::Uint64 = convert(Uint64, r) << 15
     for i in 1:8
-        out = (out << 4) | convert(Uint32, MASK_4 & (k48 $ r))
-        r, k48 = r >>> 4, k48 >>> 6
+#        println(bin8((w $ k48) >> 43, n=4))
+        out = (out << 4) | convert(Uint32, MASK_4 & ((w $ k48) >> 43))
+        w, k48 = w << 4, k48 << 6
     end
     permute_bits(out, PBOX)
 end

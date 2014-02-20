@@ -3,7 +3,7 @@ module Assert
 export @assert3, @assert3f
 
 # if the expression has 3 parts then it is assumed to be similar to
-# 'left == right' and the leftand right halves will be evaluated and
+# 'left == right' and the left and right halves will be evaluated and
 # displayed on failure.
 macro assert3(expr)
     doassert(string, expr)
