@@ -76,10 +76,12 @@ function test_pack()
     @assert b == b"12345678" b
     @assert 0x1234 == consume(pack(Uint16, hex2bytes("3412")))
     @assert 0x1234 == consume(pack(Uint16, hex2bytes("1234"), little=false))
+    println("test_pack ok")
 end
 
 function tests()
     test_pack()
+    println("Blocks.tests ok")
 end
 
 #tests()

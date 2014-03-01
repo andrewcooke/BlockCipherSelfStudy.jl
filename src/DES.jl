@@ -180,6 +180,7 @@ function test_encrypt()
     s = State(0x752878397493CB70)
     @assert3f hex encrypt(s, 0x1122334455667788) == 0xB5219EE81AA7499D
     @assert3f hex encrypt(s, 0x99aabbccddeeff00) == 0x2196687E13973856
+    println("test_encrypt ok")
 end
 
 function test_permutation()
@@ -189,6 +190,7 @@ function test_permutation()
     end
     r1 = permute_bits(0b11000000, [2,3,4,5,6,7,8,1])
     @assert r1 == 0b10000001
+    println("test_permutation ok")
 end
 
 function test_schedule()
@@ -196,12 +198,14 @@ function test_schedule()
     s = State(0b0001001100110100010101110111100110011011101111001101111111110001)
     @assert s.k[1] == 0b000110110000001011101111111111000111000001110010
     @assert s.k[16] == 0b110010110011110110001011000011100001011111110101
+    println("test_schedule ok")
 end
 
 function tests()
     test_permutation()
     test_schedule()
     test_encrypt()
+    println("DES.tests ok")
 end
 
 

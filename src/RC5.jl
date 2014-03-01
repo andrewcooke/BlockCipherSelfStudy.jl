@@ -1421,7 +1421,7 @@ function make_search_roundro{W<:Unsigned}(::Type{W}, r; retry=2, bias=4)
                         a, b = a2, b2
                         c2, d2 = e(a, b)
                         println("c:$(bin(c, n_bits)) d:$(bin(d, n_bits))")
-                        println("2:$(bin(c2, n_bits)) p:$(bin(d2, n_bits))")
+                        println("2:$(bin(c2, n_bits)) 2:$(bin(d2, n_bits))")
                         println("  $(bin(out_mask, n_bits))   $(bin(out_mask, n_bits))  $(offset)")
                         println("  $(bin(out_bit, n_bits))   $(bin(out_bit, n_bits))")
                     end
@@ -1514,12 +1514,6 @@ fake_keygen(w, r, k; rotate=FullRotation) =
 () -> State(w, r, collect(Uint8, take(k, constant(0x0))), rotate=rotate)
 
 function solutions()
-    ptext_from_encrypt(3, make_search_roundro(Uint32, 5), 
-                       make_keygen(Uint32, 0x5, 0x2, rotate=RoundRotation),
-                       k -> p -> encrypt(k, p), 32,
-                       eq=same_ptext(),
-                       encrypt2=k -> (a, b) -> encrypt(k, a, b))
-    return
     # no rotation and zero rounds 
     key_from_encrypt(3, make_solve_r0(Uint32, 0x2), 
                      make_keygen(Uint32, 0x0, 0x2),
@@ -1595,6 +1589,7 @@ function solutions()
                        k -> p -> encrypt(k, p), 32,
                        eq=same_ptext(),
                        encrypt2=k -> (a, b) -> encrypt(k, a, b))
+    return
 end
 
 
@@ -1623,6 +1618,7 @@ function test_rotatel()
     @assert y == 0x03 y
     y = rotatel(0x81, 0x81)
     @assert y == 0x03 y
+    println("test_trace ok")
 end
 
 function test_vectors()
@@ -1642,6 +1638,7 @@ function test_vectors()
                               hex2bytes("5269f149d41ba0152497574d7f153125")),
                         hex2bytes("65c178b284d197cc")))
     @assert c == hex2bytes("eb44e415da319824")
+    println("test_vectors ok")
 end
 
 function test_8()
@@ -1649,6 +1646,7 @@ function test_8()
     a, b = encrypt(State(Uint8, 0x0c, zeros(Uint8, 16)), 0x00, 0x00)
     @assert a == 0xa6 a
     @assert b == 0xea b
+    println("test_8 ok")
 end
 
 function assert_cache{W<:Unsigned}(cache, state::State{W})
@@ -1664,6 +1662,7 @@ end
 function test_set()
     @assert 0x2 == set(ZERO, 2, ONE)
     @assert 0x6 == set(ZERO, 2, THREE, 2)
+    println("test_set ok")
 end
 
 function test_table1(table1)
@@ -1676,6 +1675,7 @@ function test_table1(table1)
             @assert cd & 0x3 == (a & 0x1) | (b & 0x1 << 1)
         end
     end
+    println("test_table ok")
 end
 
 function test_table2(table1, table2)
@@ -1691,6 +1691,7 @@ function test_table2(table1, table2)
             @assert cd & 0x3 == (a & 0x1) | (b & 0x1 << 1)
         end
     end
+    println("test_table2 ok")
 end
 
 function test_cached_dfs_r5(table1, table2)
@@ -1704,6 +1705,7 @@ function test_cached_dfs_r5(table1, table2)
     println("\n$s\n$s1\n")
     @assert same_ctext(100, encrypt)(s, s1)
 #    solve((a, b) -> encrypt(s, a, b))
+    println("test_cached_dfs ok")
 end
 
 function test_chars()
@@ -1739,12 +1741,14 @@ function test_chars()
         ap2, bp2 = encrypt(s2, a, b)
         println("$(pad(a)) $(pad(b))  $(pad(ap1)) $(pad(bp1))  $(pad(ap2)) $(pad(bp2))")
     end
+    println("test_chars ok")
 end
 
 function test_influence{W<:Unsigned}(::Type{W}, r; k=16)
     s = State(W, r, collect(Uint8, take(k, rands(Uint8))), rotate=RoundRotation)
     e = (a, b) -> encrypt(s, a, b)
     print_influence(tabulate_influence(W, r, e), r)
+    println("test_influence ok")
 end
 
 function test_common_bits()
@@ -1752,6 +1756,7 @@ function test_common_bits()
     @assert 2 == common_bits(0x000000001, 0x000000001, 0x000000011)
     @assert 1 == common_bits(0x000000011, 0x000000001, 0x000000011)
     @assert 0 == common_bits(0x000000010, 0x000000001, 0x000000011)
+    println("test_common_bits ok")
 end
 
 function test_local_search(r)
@@ -1762,6 +1767,7 @@ function test_local_search(r)
     ctext = encrypt(s, ptext)
     result = collect(Uint8, search(ctext, e))
     @assert result == ptext
+    println("test_local_search ok")
 end
 
 
@@ -1781,12 +1787,12 @@ function tests()
     test_influence(Uint32, 0x5)
     test_influence(Uint32, 0x6)
     test_common_bits()
-    test_local_search(0x5)
+    test_local_search(0x3)
 #    test_local_search(0x6)
 end
 
 
 tests()
-solutions()
+#solutions()
 
 end
