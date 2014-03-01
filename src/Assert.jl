@@ -36,8 +36,8 @@ function tests()
     end
     @assert3 1 == 1           # succeeeds
     println("runtime")
-    @assert3 1 == 1+noisy1()  # prints 1 [!==] 2
-    println("Assert.tests ok")
+#    @assert3 1 == 1+noisy1()  # prints 1 [!==] 2
+#    println("Assert.tests ok")
 end
 
 #tests()

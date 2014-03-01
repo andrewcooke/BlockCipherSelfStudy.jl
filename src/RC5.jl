@@ -1792,7 +1792,7 @@ function tests()
 end
 
 
-tests()
+#tests()
 #solutions()
 
 end

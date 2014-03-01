@@ -1,4 +1,6 @@
 
+push!(LOAD_PATH, "src")
+
 module BlockCipherSelfStudy
 using Assert, Blocks, DES, RC5
 
