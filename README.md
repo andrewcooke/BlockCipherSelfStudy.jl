@@ -176,6 +176,4 @@ search over a limited number of bits.
 In practice many character / key combinations can be found at 5 rounds, but
 not at 6.
 
-<!--
 [![Build Status](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl.png)](https://travis-ci.org/andrewcooke/BlockCipherSelfStudy.jl)
--->
