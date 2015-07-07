@@ -1,6 +1,4 @@
 
-module Experiment
-
 function xor_diff_stats()
     # for RC5, one round, no rotations, we have ((X+C) $ K) - ((Y+C) $ K)
     # and would like to find K, given the ability to choose X and Y.
@@ -45,5 +43,3 @@ function xor_diff_stats()
 end
 
 xor_diff_stats()
-
-end

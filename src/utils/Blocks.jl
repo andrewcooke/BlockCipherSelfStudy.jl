@@ -1,7 +1,10 @@
 
 module Blocks
-using Tasks
+
+using ..Tasks
+
 export pack, unpack, group, ungroup, pad, produce_from
+
 
 function pack{W<:Unsigned}(::Type{W}, bytes; little=true)
     # this is little-endian by default

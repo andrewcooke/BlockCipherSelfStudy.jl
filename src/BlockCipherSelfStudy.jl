@@ -1,14 +1,13 @@
 
-push!(LOAD_PATH, "src")
-
 module BlockCipherSelfStudy
-using Assert, Blocks, DES, RC5
 
-function tests()
-    Assert.tests()
-    Blocks.tests()
-    DES.tests()
-    RC5.tests()
-end
+export RC5
+
+include("utils/Tasks.jl")
+include("utils/Blocks.jl")
+include("utils/Solve.jl")
+include("utils/GA.jl")
+
+include("rc5/RC5.jl")
 
 end

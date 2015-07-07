@@ -1,8 +1,10 @@
 
 module Solve
+
 export key_from_encrypt, ptext_from_encrypt, rands, same_ctext, same_ptext
 
-using Tasks, Blocks
+using ..Tasks: repeat, take
+using ..Blocks: pack
 
 function key_from_encrypt(n, solve, keygen, encrypt; eq= ==)
     for i = 1:n

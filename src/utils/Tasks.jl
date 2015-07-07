@@ -1,6 +1,8 @@
 
 module Tasks
+
 export take, repeat, constant, counter, chain
+
 
 function take(n, source)
     Task() do
