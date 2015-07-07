@@ -1,7 +1,6 @@
 
 module GA
 
-using Debug
 using Compat: @compat
 
 export Population, evolve
