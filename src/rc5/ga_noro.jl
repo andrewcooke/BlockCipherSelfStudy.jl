@@ -5,7 +5,7 @@ using ..GA
 
 # the "real" score is the float; the ints are to show how many of each bit
 # we have encoded correctly and to assess completness (and so target mutation)
-typealias Score Tuple{Float64, Vector{Int}}
+@compat typealias Score Tuple{Float64, Vector{Int}}
 
 # for sorting of (Score, Individual)
 Base.isless{W<:Unsigned}(s1::State{W}, s2::State{W}) = false

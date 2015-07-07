@@ -16,7 +16,7 @@ function uint_for_bits(n)
     error("no uint")
 end
 
-function test_bits{W<:Unsigned}(ptext::Vector{Tuple{W,W}}, ctext::Vector{Tuple{W,W}}, state::State{W}, level::Uint)
+@compat function test_bits{W<:Unsigned}(ptext::Vector{Tuple{W,W}}, ctext::Vector{Tuple{W,W}}, state::State{W}, level::Uint)
     mask::W = (one(W) << level) - one(W)
     # much faster than zip
     for i in 1:length(ptext)
@@ -44,8 +44,8 @@ end
 
 function make_dfs_noro{W<:Unsigned}(::Type{W}, r, len)
     function solve(e)
-        ptext = collect(Tuple{W, W}, group(2, take(2*len, rands(W))))
-        ctext = Tuple{W,W}[e(a, b) for (a, b) in ptext]
+        @compat ptext = collect(Tuple{W, W}, group(2, take(2*len, rands(W))))
+        @compat ctext = Tuple{W,W}[e(a, b) for (a, b) in ptext]
         width::Uint, depth::Uint = 2r+2, 8*sizeof(W)
         U = uint_for_bits(width+1)  # extra bit for overflow
         U = Uint64  # faster than minimum size above (left in for error check)

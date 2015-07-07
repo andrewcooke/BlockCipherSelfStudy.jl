@@ -2,6 +2,7 @@
 module GA
 
 using Debug
+using Compat: @compat
 
 export Population, evolve
 
@@ -36,7 +37,7 @@ type Population{Context, Individual, Score}
     generation::Int
     size::Int
     n_children::Int
-    sorted::Vector{Tuple{Score, Individual}}
+    @compat sorted::Vector{Tuple{Score, Individual}}
 end
 
 function Population{C,I,S}(context::C, popn::Array{I,1}, n_children, ::Type{S})

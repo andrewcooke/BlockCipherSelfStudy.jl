@@ -1,6 +1,8 @@
 
 module RC5
 
+using Compat: @compat
+
 using ..Blocks: unpack, group, pack, chain, pad, produce_from
 using ..Tasks: take, constant
 using ..Solve: rands, same_ctext, key_from_encrypt, same_ptext,

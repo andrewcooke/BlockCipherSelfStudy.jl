@@ -146,7 +146,7 @@ function diff(c1, c2)
     d
 end
 
-function print_delta{W<:Unsigned}(state::State{W}, ab::Vector{Tuple{W,W}};
+@compat function print_delta{W<:Unsigned}(state::State{W}, ab::Vector{Tuple{W,W}};
                                   range=1:0, both=false, chain=false)
     t = Array(Trace{W}, 0)
     a, b = ab[1]
