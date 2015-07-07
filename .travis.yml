@@ -1,16 +1,15 @@
-language: cpp
-compiler:
-  - clang
+language: julia
+os:
+  - linux
+  - osx
+julia:
+  - release
+  - nightly
 notifications:
   email: false
-env:
-  matrix: 
-    - JULIAVERSION="julianightlies" 
-before_install:
-  - sudo add-apt-repository ppa:staticfloat/julia-deps -y
-  - sudo add-apt-repository ppa:staticfloat/${JULIAVERSION} -y
-  - sudo apt-get update -qq -y
-  - sudo apt-get install libpcre3-dev julia -y
-script:
-  - julia -e 'Pkg.init(); run(`ln -s $(pwd()) $(Pkg.dir("BlockCipherSelfStudy"))`); Pkg.pin("BlockCipherSelfStudy"); Pkg.add("Debug"); Pkg.resolve()'
-  - julia -e 'using BlockCipherSelfStudy; BlockCipherSelfStudy.tests(); @assert isdefined(:BlockCipherSelfStudy); @assert typeof(BlockCipherSelfStudy) === Module'
+# uncomment the following lines to override the default test script
+#script:
+#  - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
+#  - julia --check-bounds=yes -e 'Pkg.clone(pwd()); Pkg.build("BlockCipherSelfStudy"); Pkg.test("BlockCipherSelfStudy"; coverage=true)'
+after_success:
+- julia -e 'cd(Pkg.dir("BlockCipherSelfStudy")); Pkg.add("Coverage"); using Coverage; Coveralls.submit(Coveralls.process_folder())'
