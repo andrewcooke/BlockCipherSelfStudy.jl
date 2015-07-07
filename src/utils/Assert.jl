@@ -1,6 +1,8 @@
 
 module Assert
+
 export @assert3, @assert3f
+
 
 # if the expression has 3 parts then it is assumed to be similar to
 # 'left == right' and the left and right halves will be evaluated and

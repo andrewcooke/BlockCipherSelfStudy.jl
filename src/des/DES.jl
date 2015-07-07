@@ -1,6 +1,12 @@
 
 module DES
-using Tasks, Solve, Assert
+
+using ..Assert: @assert3f
+using ..Solve: rands
+using ..Tasks: take
+using ..Blocks: chain
+
+export tests
 
 
 # An implementation of DES.  Encryption only, and not very efficient.
@@ -171,6 +177,8 @@ function encrypt{S<:SBox}(s::State{S}, p::Uint64)
 end
 
 
+# --- tests
+
 function test_encrypt()
     z = State(0x0123456789abcdef, r=0x0)
     for r1 in take(10, rands(Uint64))
@@ -207,8 +215,5 @@ function tests()
     test_encrypt()
     println("DES.tests ok")
 end
-
-
-#tests()
 
 end
